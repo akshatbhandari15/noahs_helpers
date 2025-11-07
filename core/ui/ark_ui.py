@@ -60,6 +60,13 @@ class ArkUI:
 
         return west_x <= x <= east_x and north_y <= y <= south_y
 
+    def map_coords_to_px(self, x: float, y: float) -> tuple[int, int]:
+        west_px, east_px, north_px, south_px = self.get_map_px_w_e_n_s()
+
+        x_px = west_px + (east_px - west_px) * x / c.X
+        y_px = north_px + (south_px - north_px) * y / c.Y
+        return int(x_px), int(y_px)
+
     def coords_to_px(self, x: float, y: float) -> tuple[int, int]:
         if not self.coords_fit_in_grid(x, y):
             raise Exception(f"tried getting px for coords not in grid: {x, y}")
@@ -82,13 +89,18 @@ class ArkUI:
         )
         return int(x_px), int(y_px)
 
-    def draw_map(self):
+    def get_map_px_w_e_n_s(self) -> tuple[int, int, int, int]:
         west_px = c.LANDSCAPE_WIDTH + int(
             ((c.SCREEN_WIDTH + c.MARGIN_X - c.LANDSCAPE_WIDTH) - c.MAP_PX) / 2
         )
         north_px = c.SCREEN_HEIGHT - c.MAP_PX - c.MARGIN_Y
         east_px = west_px + c.MAP_PX
         south_px = north_px + c.MAP_PX
+
+        return west_px, east_px, north_px, south_px
+
+    def draw_map(self):
+        west_px, east_px, north_px, south_px = self.get_map_px_w_e_n_s()
 
         # border_rect = pygame.Rect(west_px, north_px, c.MAP_PX, c.MAP_PX)
         # pygame.draw.rect(self.screen, color, border_rect)  # fill
@@ -123,6 +135,10 @@ class ArkUI:
             #     val = c.X * i / c.MAP_SPLIT
             #     line = f"{int(val)}" if val.is_integer() else f"{val:.1f}"
             # write_at(self.screen, self.tiny_font, line, (x, c.MARGIN_Y - 20))
+
+        self.draw_ark_on_map()
+        self.draw_animals_on_map()
+        self.draw_helpers_on_map()
 
     def get_w_e_n_s(self) -> tuple[int, int, int, int]:
         west_x, north_y = self.selected_cell
@@ -182,6 +198,15 @@ class ArkUI:
             write_at(
                 self.screen, self.tiny_font, line, (c.MARGIN_X - 10, y), align="right"
             )
+
+    def draw_ark_on_map(self):
+        ark_x, ark_y = self.engine.ark.position
+        ark_center = self.map_coords_to_px(ark_x, ark_y)
+
+        ark_img_orig = pygame.image.load("sprites/ark.png").convert_alpha()
+        ark_img = pygame.transform.scale(ark_img_orig, (c.ARK_RADIUS, c.ARK_RADIUS))
+        ark_rect = ark_img.get_rect(center=ark_center)
+        self.screen.blit(ark_img, ark_rect)
 
     def draw_ark(self):
         ark_x, ark_y = self.engine.ark.position
@@ -266,6 +291,13 @@ class ArkUI:
 
             y += 50
 
+    def draw_helpers_on_map(self):
+        for helper in self.engine.helpers:
+            helper_x, helper_y = helper.position
+
+            helper_center = self.map_coords_to_px(helper_x, helper_y)
+            helper.draw_on_map(self.screen, helper_center)
+
     def draw_helpers(self):
         for helper in self.engine.helpers:
             helper_x, helper_y = helper.position
@@ -315,6 +347,11 @@ class ArkUI:
                 (margined_x, y),
                 align="left",
             )
+
+    def draw_animals_on_map(self):
+        for animal, cell in self.engine.free_animals.items():
+            animal_center = self.map_coords_to_px(cell.x, cell.y)
+            animal.draw_on_map(self.screen, animal_center)
 
     def draw_animals(self):
         for animal, cell in self.engine.free_animals.items():

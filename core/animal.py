@@ -44,3 +44,8 @@ class Animal:
         text = font.render(self._id_to_letter(), False, self._gender_to_color())
         rect = text.get_rect(center=pos)
         screen.blit(text, rect)
+
+    def draw_on_map(
+        self, screen: pygame.Surface, pos: tuple[int, int]
+    ):
+        pygame.draw.circle(screen, self._gender_to_color(), pos, 2)

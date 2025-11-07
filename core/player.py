@@ -121,6 +121,10 @@ class Player(ABC):
         screen.blit(text, rect)
 
     @final
+    def draw_on_map(self, screen: pygame.Surface, pos: tuple[int, int]):
+        pygame.draw.circle(screen, c.HELPER_COLOR, pos, 4)
+
+    @final
     def draw_flock(
         self, screen: pygame.Surface, font: pygame.font.Font, start_pos: tuple[int, int]
     ):
