@@ -67,9 +67,6 @@ class RandomPlayer(Player):
 
         if len(cellview.animals) > 0:
             random_animal = choice(tuple(cellview.animals))
-            print(
-                f"obtaining a={random_animal}, (hash={random_animal.__hash__()}, id=({id(random_animal)})) in {self.position}"
-            )
             return Obtain(random_animal)
 
         closest_animal = self.find_closest_animal()

@@ -80,7 +80,8 @@ class ArkUI:
         border_rect = pygame.Rect(
             c.MARGIN_X, c.MARGIN_Y, c.LANDSCAPE_WIDTH, c.LANDSCAPE_HEIGHT
         )
-        pygame.draw.rect(self.screen, c.GRID_COLOR, border_rect)  # fill
+        color = c.DAMP_GRASS_COLOR if self.engine.is_raining() else c.GRASS_COLOR
+        pygame.draw.rect(self.screen, color, border_rect)  # fill
         pygame.draw.rect(self.screen, (0, 0, 0), border_rect, 2)  # border
 
         for i in range(c.NUM_GRID_LINES + 1):
@@ -157,7 +158,7 @@ class ArkUI:
 
         return left, top
 
-    def draw_hovered_ark(self, pos: tuple[int, int], animals: set[Animal]):
+    def draw_hovered_ark(self, pos: tuple[int, int]):
         left, top = self.render_hover_view("ARK")
 
         margined_x = left + c.HOVERED_MARGIN_X
@@ -168,16 +169,7 @@ class ArkUI:
             align="left",
         )
 
-        species_in_ark: dict[int, list[bool]] = {
-            sid: [False, False] for sid in self.engine.species_stats.keys()
-        }
-
-        for animal in animals:
-            sid = animal.species_id
-            if animal.gender == Gender.Male:
-                species_in_ark[sid][0] = True
-            elif animal.gender == Gender.Female:
-                species_in_ark[sid][1] = True
+        species_in_ark = self.engine.ark.get_species()
 
         y = top + c.MARGIN_Y * 2
         for sid, (has_male, has_female) in species_in_ark.items():
@@ -320,8 +312,8 @@ class ArkUI:
                     smallest_radius = radius
 
         match best_obj:
-            case Ark(position=p, animals=a):
-                self.draw_hovered_ark(p, a)
+            case Ark(position=p):
+                self.draw_hovered_ark(p)
             case Player(id=id, position=p, flock=f):
                 self.draw_hovered_helper(id, p, f)
             case Animal(species_id=sid, gender=g):
@@ -342,11 +334,9 @@ class ArkUI:
             f"{self.engine.helpers[0]}",
             "",
             f"Turn: {self.engine.time_elapsed}/{self.engine.time}",
-            # f"Total Growth: {self.garden.total_growth():.2f}",
+            f"Score: {self.engine.ark.get_score()}",
             f"Helpers: {len(self.engine.helpers)}",
             f"is_raining: {self.engine.is_raining()}",
-            # "",
-            # f"{'PAUSED' if self.paused else 'RUNNING'}",
             f"{'DEBUG ON' if self.debug_mode else 'DEBUG OFF'}",  # NEW: Show debug status
         ]
 

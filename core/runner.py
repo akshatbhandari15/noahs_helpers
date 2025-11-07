@@ -65,7 +65,7 @@ class ArkRunner:
                 cell.animals.add(animal)
                 animals[animal] = cell
 
-        self.ark = Ark(self.ark_pos)
+        self.ark = Ark(self.ark_pos, species_stats)
 
         self.helpers = [
             self.player_class(id, *self.ark.position) for id in range(self.num_helpers)
