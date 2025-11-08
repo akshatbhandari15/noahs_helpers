@@ -25,24 +25,16 @@ class RandomPlayer(Player):
         super().__init__(id, ark_x, ark_y, kind, num_helpers, species_populations)
         print(f"I am {self}")
 
-    def check_surroundings(self, snapshot: HelperSurroundingsSnapshot):
-        self.position = snapshot.position
-        self.sight = snapshot.sight
+        self.is_raining = False
 
-        msg = snapshot.time_elapsed + self.id
-        if not self.is_message_valid(msg):
-            msg = msg & 0xFF
-
-        return msg
-
-    def get_my_cell(self) -> CellView:
+    def _get_my_cell(self) -> CellView:
         xcell, ycell = tuple(map(int, self.position))
         if not self.sight.cell_is_in_sight(xcell, ycell):
             raise Exception(f"{self} failed to find own cell")
 
         return self.sight.get_cellview_at(xcell, ycell)
 
-    def find_closest_animal(self) -> tuple[int, int] | None:
+    def _find_closest_animal(self) -> tuple[int, int] | None:
         closest_animal = None
         closest_dist = -1
         closest_pos = None
@@ -56,7 +48,7 @@ class RandomPlayer(Player):
 
         return closest_pos
 
-    def get_random_move(self) -> tuple[float, float]:
+    def _get_random_move(self) -> tuple[float, float]:
         old_x, old_y = self.position
         dx, dy = random() - 0.5, random() - 0.5
 
@@ -64,6 +56,17 @@ class RandomPlayer(Player):
             dx, dy = random() - 0.5, random() - 0.5
 
         return old_x + dx, old_y + dy
+
+    def check_surroundings(self, snapshot: HelperSurroundingsSnapshot):
+        self.position = snapshot.position
+        self.sight = snapshot.sight
+        self.is_raining = snapshot.is_raining
+
+        msg = snapshot.time_elapsed + self.id
+        if not self.is_message_valid(msg):
+            msg = msg & 0xFF
+
+        return msg
 
     def get_action(self, messages: list[Message]) -> Action | None:
         # for msg in messages:
@@ -73,17 +76,24 @@ class RandomPlayer(Player):
         if self.kind == Kind.Noah:
             return None
 
+        # If it's raining, go to ark
+        if self.is_raining:
+            return Move(*self.move_towards(*self.ark_position))
+
+        # If I have obtained an animal, go to ark
         if not self.is_flock_empty():
             return Move(*self.move_towards(*self.ark_position))
 
-        cellview = self.get_my_cell()
-
+        # If I've chased an animal, I'll obtain it
+        cellview = self._get_my_cell()
         if len(cellview.animals) > 0:
             random_animal = choice(tuple(cellview.animals))
             return Obtain(random_animal)
 
-        closest_animal = self.find_closest_animal()
+        # If I see any animals, I'll chase the closest one
+        closest_animal = self._find_closest_animal()
         if closest_animal:
             return Move(*self.move_towards(*closest_animal))
 
-        return Move(*self.get_random_move())
+        # Move in a random direction
+        return Move(*self._get_random_move())
