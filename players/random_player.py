@@ -1,5 +1,3 @@
-from contextlib import contextmanager
-from os import confstr
 from random import random, choice
 
 from core.action import Action, Move, Obtain

@@ -47,10 +47,10 @@ def sanitize_player(org_player: None | str) -> type[Player]:
 
 def sanitize_num_helpers(num_helpers: int | None, map_args: MapArgs | None) -> int:
     if num_helpers is None and map_args is None:
-        raise Exception(f"did not provide num_helpers")
+        raise Exception("did not provide num_helpers")
 
     if num_helpers is not None and map_args is not None:
-        raise Exception(f"Provided `--num_helpers` flag and `--map_path`")
+        raise Exception("Provided `--num_helpers` flag and `--map_path`")
 
     if num_helpers is not None:
         if num_helpers <= 1:
@@ -70,7 +70,7 @@ def sanitize_animals(
         raise Exception("Missing animal populations")
 
     if org_animals is not None and map_args is not None:
-        raise Exception(f"defined both `--animals` and `--map_path")
+        raise Exception("defined both `--animals` and `--map_path")
 
     if org_animals is not None:
         animals = list(map(int, org_animals))

@@ -15,16 +15,16 @@ def main():
     else:
         score, times = runner.run()
 
-    print(f"RESULTS")
-    print(f"{'#'*20}")
+    print("RESULTS")
+    print(f"{'#' * 20}")
     print(f"SCORE={score}")
     if len(times):
         print(f"TOTAL_TURN_TIME={sum(times):.4f}s")
         print(f"TURNS_PER_SECOND={1 / (sum(times) / len(times)):.0f}")
     else:
-        print(f"TOTAL_TURN_TIME=-1")
-        print(f"TURNS_PER_SECOND=-1")
-    print(f"{'#'*20}")
+        print("TOTAL_TURN_TIME=-1")
+        print("TURNS_PER_SECOND=-1")
+    print(f"{'#' * 20}")
 
 
 if __name__ == "__main__":
