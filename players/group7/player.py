@@ -17,17 +17,17 @@ SPECIES_BITS = 0b11111000  # bits 3-7 for species ID
 def encode_message(species_id: int, gender: int, from_ark: bool) -> int:
     msg = (species_id << 3) | (gender << 2)
     if from_ark:
-        msg |= ARK_BIT
+        msg |= ARK_BIT  # set the ARK_BIT if message comes from the ark
     else:
-        msg |= LOCAL_BIT
-    return msg & 0xFF
+        msg |= LOCAL_BIT  # set the LOCAL_BIT if message comes from a helper
+    return msg & 0xFF  # ensure it fits in one byte
 
 
 def decode_message(msg_int: int):
-    from_ark = bool(msg_int & ARK_BIT)
-    from_local = bool(msg_int & LOCAL_BIT)
-    gender = (msg_int & GENDER_BIT) >> 2
-    species_id = (msg_int & SPECIES_BITS) >> 3
+    from_ark = bool(msg_int & ARK_BIT)  # check if ARK_BIT is set
+    from_local = bool(msg_int & LOCAL_BIT)  # check if LOCAL_BIT is set
+    gender = (msg_int & GENDER_BIT) >> 2  # extract gender from bit 2
+    species_id = (msg_int & SPECIES_BITS) >> 3  # extract species ID from bits 3-7
     return species_id, gender, from_ark, from_local
 
 
