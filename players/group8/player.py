@@ -1,3 +1,7 @@
+"""Player8: Same as Player7 with improved animal interception strategy."""
+
+from __future__ import annotations
+
 from core.action import Action
 from core.message import Message
 from core.player import Player

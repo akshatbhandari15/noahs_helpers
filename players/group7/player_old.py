@@ -18,9 +18,7 @@ class Player7(Player):
         num_helpers: int,
         species_populations: dict[str, int],
     ):
-        super().__init__(
-            id, ark_x, ark_y, kind, num_helpers, species_populations
-        )
+        super().__init__(id, ark_x, ark_y, kind, num_helpers, species_populations)
         self.my_territory = self.calculate_territory()
         self.priorities = self.calculate_species_priorities()
         self.phase = "explore"
@@ -45,25 +43,25 @@ class Player7(Player):
         self._pursuit_lock_until: int = 0
         self._pursuit_last_dist: float | None = None
         self._pursuit_stuck_count: int = 0
-        
+
     def calculate_territory(self):
         """Divide the map into territories for each helper"""
         grid_size = 1000
         num_per_side = max(1, int(math.sqrt(self.num_helpers)))
         sector_size = grid_size / num_per_side
-        
+
         sector_x = (self.id % num_per_side) * sector_size
         sector_y = (self.id // num_per_side) * sector_size
-        
+
         return {
-            'min_x': int(sector_x),
-            'max_x': int(min(sector_x + sector_size, grid_size - 1)),
-            'min_y': int(sector_y),
-            'max_y': int(min(sector_y + sector_size, grid_size - 1)),
-            'center_x': int(sector_x + sector_size / 2),
-            'center_y': int(sector_y + sector_size / 2)
+            "min_x": int(sector_x),
+            "max_x": int(min(sector_x + sector_size, grid_size - 1)),
+            "min_y": int(sector_y),
+            "max_y": int(min(sector_y + sector_size, grid_size - 1)),
+            "center_x": int(sector_x + sector_size / 2),
+            "center_y": int(sector_y + sector_size / 2),
         }
-    
+
     def calculate_species_priorities(self):
         """Map species_id (int) -> priority (rarer = higher)."""
         if not self.species_populations:
@@ -74,7 +72,7 @@ class Player7(Player):
 
         # species_populations keys are letters 'a', 'b', ... map to ids 0,1,...
         for letter, population in self.species_populations.items():
-            species_id = ord(letter) - ord('a')
+            species_id = ord(letter) - ord("a")
             # Avoid div by zero; if population is 0, treat as very high
             priorities[species_id] = (
                 (max_pop / population) if population > 0 else (max_pop * 10.0)
@@ -87,31 +85,30 @@ class Player7(Player):
         self.last_snapshot = snapshot  # Store for use in get_action
         self.update_state(snapshot)
         return self.encode_message()
-    
+
     def update_state(self, snapshot: HelperSurroundingsSnapshot):
         """Update internal state based on surroundings"""
         self.turn_count += 1
-        
+
         # Update is_raining from snapshot
         self.is_raining = snapshot.is_raining
         if self.is_raining and self._rain_started_at is None:
             # Use global time elapsed for precise return window tracking
             self._rain_started_at = snapshot.time_elapsed
-        
+
         # Keep our internal state in sync with the engine
         # Position and flock in the Engine are held on PlayerInfo;
         # snapshots provide the authoritative values each turn.
         self.position = snapshot.position
-        self._recent_cells.append(
-            (int(self.position[0]), int(self.position[1]))
-        )
+        self._recent_cells.append((int(self.position[0]), int(self.position[1])))
         prev_size = len(self.flock)
         # Use a copy to avoid accidental mutation across frames
         self.flock = snapshot.flock.copy()
 
         # Expire blocked cells
-        to_delete = [cell for cell, exp in self._blocked_cells.items()
-                     if exp <= self.turn_count]
+        to_delete = [
+            cell for cell, exp in self._blocked_cells.items() if exp <= self.turn_count
+        ]
         for cell in to_delete:
             del self._blocked_cells[cell]
 
@@ -124,39 +121,39 @@ class Player7(Player):
         if self._intend_obtain and len(self.flock) > prev_size:
             self._linger_until = self.turn_count + 2
         self._intend_obtain = False
-        
+
         # Update ark status if we can see it
         if snapshot.ark_view:
             self.update_ark_status(snapshot.ark_view.animals)
-        
+
         # Update known animals in sight
         # Sight is an iterable of CellView objects, each with animals
         if snapshot.sight:
             for cell_view in snapshot.sight:
                 for animal in cell_view.animals:
                     # Animals are in cells at (cell_view.x, cell_view.y)
-                    key = (
-                        cell_view.x, cell_view.y, animal.species_id
-                    )
+                    key = (cell_view.x, cell_view.y, animal.species_id)
                     self.known_animals[key] = {
-                        'species_id': animal.species_id,
-                        'gender': animal.gender,
-                        'position': (cell_view.x, cell_view.y),
-                        'turn_seen': self.turn_count
+                        "species_id": animal.species_id,
+                        "gender": animal.gender,
+                        "position": (cell_view.x, cell_view.y),
+                        "turn_seen": self.turn_count,
                     }
-    
+
     def update_ark_status(self, ark_animals):
         """Update what species/genders are already on the ark"""
         from core.animal import Gender
+
         self.ark_status = {}
         for animal in ark_animals:
             if animal.species_id not in self.ark_status:
                 self.ark_status[animal.species_id] = {
-                    Gender.Male: False, Gender.Female: False
+                    Gender.Male: False,
+                    Gender.Female: False,
                 }
             if animal.gender != Gender.Unknown:
                 self.ark_status[animal.species_id][animal.gender] = True
-    
+
     def encode_message(self) -> int:
         """Encode important information into 1 byte (8 bits)"""
         from core.animal import Gender
@@ -165,26 +162,23 @@ class Player7(Player):
         # Bit 5: Gender (0=Male, 1=Female)
         # Bit 6: Has animal (1) or just spotted (0)
         # Bit 7: High priority flag
-        
+
         if not self.flock:
             return 0  # No important message
-        
+
         # Encode the highest priority animal in our flock
         highest_priority_animal = max(
-            self.flock,
-            key=lambda a: self.get_animal_value(
-                a.species_id, a.gender
-            )
+            self.flock, key=lambda a: self.get_animal_value(a.species_id, a.gender)
         )
-        
+
         species_id = highest_priority_animal.species_id
-        
+
         message = species_id & 0x1F  # 5 bits for species
         if highest_priority_animal.gender == Gender.Female:
-            message |= (1 << 5)
-        message |= (1 << 6)  # We have the animal
+            message |= 1 << 5
+        message |= 1 << 6  # We have the animal
         message |= (1 << 7) if self.priorities.get(species_id, 0) > 1.5 else 0
-        
+
         return message
 
     def get_action(self, messages: list[Message]) -> Action | None:
@@ -192,25 +186,22 @@ class Player7(Player):
         # Noah doesn't move or take actions
         if self.kind == Kind.Noah:
             return None
-        
+
         self.process_messages(messages)
-        
+
         # Phase 1: Return to ark if raining or time to return
         if self.phase == "return" or self.should_return_to_ark():
             self.phase = "return"
             if self.at_ark():
                 return None  # We're already at the ark
             return self.move_towards_ark()
-        
+
         # Phase 2: Return to ark if flock is full or should offload
-        if (
-            len(self.flock) >= 4
-            or (len(self.flock) > 0 and self.should_offload())
-        ):
+        if len(self.flock) >= 4 or (len(self.flock) > 0 and self.should_offload()):
             if self.at_ark():
                 return None  # Unload happens automatically
             return self.move_towards_ark()
-        
+
         # Phase 3a: Try to obtain animals in current cell first, and linger
         # a couple turns after success to keep harvesting.
         if self._linger_until > self.turn_count:
@@ -245,34 +236,32 @@ class Player7(Player):
             else:
                 self._intend_obtain = True
                 return Obtain(target)
-        
+
         # Phase 4: Move toward highest value target animal
         target_animal = self.find_highest_value_target()
         if target_animal:
-            return self.move_towards_position(target_animal['position'])
+            return self.move_towards_position(target_animal["position"])
 
         # Phase 4b: Pursue best cell in 5km sight (sticky for a few turns)
         move = self._pursue_best_cell()
         if move is not None:
             return move
-        
+
         # Phase 5: Explore territory (even if at ark with empty flock)
         return self.explore_territory()
-    
+
     def process_messages(self, messages: list[Message]):
         """Process messages from other helpers"""
         # Decode message (currently not used, but available for coordination)
         pass
-    
+
     def should_return_to_ark(self) -> bool:
         """Determine if it's time to return to the ark"""
         # If raining, we have c.START_RAIN turns to get back
         if self.is_raining and self._rain_started_at is not None:
             # Rough ETA in turns using 0.99 step scaled as 1.0
             eta = int(math.ceil(self.distance_to_ark() / c.MAX_DISTANCE_KM))
-            turns_since_rain = (
-                self.last_snapshot.time_elapsed - self._rain_started_at
-            )
+            turns_since_rain = self.last_snapshot.time_elapsed - self._rain_started_at
             time_left = c.START_RAIN - turns_since_rain
             # 20% safety buffer
             return eta * 1.2 >= time_left
@@ -283,31 +272,28 @@ class Player7(Player):
             return True
 
         return False
-    
+
     def should_offload(self) -> bool:
         """Determine if we should return to ark to offload"""
         if len(self.flock) >= 4:
             return True
-        
+
         # If we have high-value animals and flock is 75% full
         if len(self.flock) >= 3:
             high_value_count = sum(
-                1 for animal in self.flock
-                if self.get_animal_value(
-                    animal.species_id, animal.gender
-                ) >= 90
+                1
+                for animal in self.flock
+                if self.get_animal_value(animal.species_id, animal.gender) >= 90
             )
             return high_value_count >= 2
-        
+
         return False
-    
-    def find_best_animal_in_cell(
-        self, snapshot: HelperSurroundingsSnapshot | None
-    ):
+
+    def find_best_animal_in_cell(self, snapshot: HelperSurroundingsSnapshot | None):
         """Find the best animal to obtain in our current cell"""
         if not snapshot or not snapshot.sight:
             return None
-        
+
         # Get the cell we're currently in
         current_x = int(snapshot.position[0])
         current_y = int(snapshot.position[1])
@@ -316,31 +302,29 @@ class Player7(Player):
         expiry = self._blocked_cells.get((current_x, current_y))
         if expiry is not None and expiry > self.turn_count:
             return None
-        
+
         # Find animals at our current cell
         animals_at_position = []
         for cell_view in snapshot.sight:
             if cell_view.x == current_x and cell_view.y == current_y:
                 animals_at_position = list(cell_view.animals)
                 break
-        
+
         if not animals_at_position:
             return None
-        
+
         # Find the best animal in cell; prefer completers
         best_animal = None
         best_value = -1
         best_completer = None
         best_completer_value = -1
-        
+
         for animal in animals_at_position:
             # Skip if we already have this animal in our flock
             if animal in self.flock:
                 continue
-            
-            value = self.get_animal_value(
-                animal.species_id, animal.gender
-            )
+
+            value = self.get_animal_value(animal.species_id, animal.gender)
             # Check if animal would complete a species on the ark
             if self._would_complete_species(animal.species_id, animal.gender):
                 if value > best_completer_value:
@@ -354,6 +338,7 @@ class Player7(Player):
 
     def _would_complete_species(self, species_id: int, gender) -> bool:
         from core.animal import Gender
+
         info = self.ark_status.get(
             species_id, {Gender.Male: False, Gender.Female: False}
         )
@@ -432,10 +417,7 @@ class Player7(Player):
             dx = cell_view.x - self.position[0]
             dy = cell_view.y - self.position[1]
             dist = math.hypot(dx, dy)
-            if (
-                dist < best_dist
-                or (dist == best_dist and cell_best_val > best_val)
-            ):
+            if dist < best_dist or (dist == best_dist and cell_best_val > best_val):
                 best_dist = dist
                 best_pos = (cell_view.x, cell_view.y)
                 best_val = cell_best_val
@@ -458,7 +440,7 @@ class Player7(Player):
                 best = max(best, self.get_animal_value(a.species_id, a.gender))
             break
         return best
-    
+
     def find_highest_value_target(self):
         """Find a good target not in our current or blocked cell.
 
@@ -474,10 +456,10 @@ class Player7(Player):
 
         for _, animal_info in self.known_animals.items():
             # discard stale info
-            if self.turn_count - animal_info['turn_seen'] > 50:
+            if self.turn_count - animal_info["turn_seen"] > 50:
                 continue
 
-            tx, ty = animal_info['position']
+            tx, ty = animal_info["position"]
 
             # skip current cell and temporarily blocked cells
             if (tx, ty) == (curr_x, curr_y):
@@ -487,7 +469,7 @@ class Player7(Player):
                 continue
 
             value = self.get_animal_value(
-                animal_info['species_id'], animal_info.get('gender')
+                animal_info["species_id"], animal_info.get("gender")
             )
 
             # prefer closer high-value targets; avoid div by zero
@@ -517,9 +499,7 @@ class Player7(Player):
         if (
             self._pursuit_target is not None
             and self._pursuit_expires_at > self.turn_count
-            and self._blocked_cells.get(
-                self._pursuit_target, 0
-            ) <= self.turn_count
+            and self._blocked_cells.get(self._pursuit_target, 0) <= self.turn_count
         ):
             # If reached the target cell, clear pursuit
             if self._pursuit_target == curr:
@@ -543,9 +523,7 @@ class Player7(Player):
 
                 # If stuck for 3 turns, block and drop this target
                 if self._pursuit_stuck_count >= 3:
-                    self._blocked_cells[self._pursuit_target] = (
-                        self.turn_count + 5
-                    )
+                    self._blocked_cells[self._pursuit_target] = self.turn_count + 5
                     self._pursuit_target = None
                     self._pursuit_last_dist = None
                     self._pursuit_stuck_count = 0
@@ -615,66 +593,63 @@ class Player7(Player):
         self._pursuit_stuck_count = 0
 
         return self.move_towards_position(best_cell)
-    
+
     def get_animal_value(self, species_id: int, gender) -> float:
         """Calculate value of animal based on ark status and rarity"""
         from core.animal import Gender
+
         base_priority = self.priorities.get(species_id, 1.0)
-        
+
         # Check ark status
         ark_info = self.ark_status.get(
-            species_id,
-            {Gender.Male: False, Gender.Female: False}
+            species_id, {Gender.Male: False, Gender.Female: False}
         )
-        
+
         if not gender or gender == Gender.Unknown:
             # Don't know gender yet, assume average value
             return base_priority * 50
-        
+
         has_male = ark_info[Gender.Male]
         has_female = ark_info[Gender.Female]
-        
+
         # Maximum value: completing a species (100 points)
-        if (gender == Gender.Male and has_female and not has_male) or \
-           (gender == Gender.Female and has_male and not has_female):
+        if (gender == Gender.Male and has_female and not has_male) or (
+            gender == Gender.Female and has_male and not has_female
+        ):
             return base_priority * 100
-        
+
         # High value: first animal of species
         if not has_male and not has_female:
             return base_priority * 80
-        
+
         # Low value: duplicate gender or already complete
         return base_priority * 10
-    
+
     def move_towards_ark(self) -> Move:
         """Move toward the ark"""
         # Use base class move_towards which handles 1km constraint
-        new_x, new_y = self.move_towards(
-            self.ark_position[0], self.ark_position[1]
-        )
+        new_x, new_y = self.move_towards(self.ark_position[0], self.ark_position[1])
         return Move(new_x, new_y)
-    
-    def move_towards_position(
-        self, target_position: tuple[float, float]
-    ) -> Move:
+
+    def move_towards_position(self, target_position: tuple[float, float]) -> Move:
         """Move toward a target position"""
         # Use base class move_towards which handles 1km constraint
-        new_x, new_y = self.move_towards(
-            target_position[0], target_position[1]
-        )
+        new_x, new_y = self.move_towards(target_position[0], target_position[1])
         return Move(new_x, new_y)
-    
+
     def explore_territory(self) -> Move:
         """Boustrophedon (lawnmower) sweep within assigned territory."""
         t = self.my_territory
-        min_x, max_x = t['min_x'], t['max_x']
-        min_y, max_y = t['min_y'], t['max_y']
-        cx, cy = t['center_x'], t['center_y']
+        min_x, max_x = t["min_x"], t["max_x"]
+        min_y, max_y = t["min_y"], t["max_y"]
+        cx, cy = t["center_x"], t["center_y"]
 
         # If we're out of our sector, head to center first
         if (
-            self.position[0] < min_x or self.position[0] > max_x or
-            self.position[1] < min_y or self.position[1] > max_y
+            self.position[0] < min_x
+            or self.position[0] > max_x
+            or self.position[1] < min_y
+            or self.position[1] > max_y
         ):
             return self.move_towards_position((cx, cy))
 
@@ -690,7 +665,7 @@ class Player7(Player):
         y_target = min_y + min(row * row_step, height - 1)
 
         # Alternate direction each row
-        left_to_right = (row % 2 == 0)
+        left_to_right = row % 2 == 0
         x_progress = self.turn_count % (width + 1)
         x_target = min_x + x_progress if left_to_right else max_x - x_progress
 
@@ -699,12 +674,14 @@ class Player7(Player):
         y_target = min(max(y_target, min_y), max_y)
 
         return self.move_towards_position((x_target, y_target))
-    
+
     def at_ark(self) -> bool:
         """Check if we're at the ark"""
-        return (abs(self.position[0] - self.ark_position[0]) < 0.5 and
-                abs(self.position[1] - self.ark_position[1]) < 0.5)
-    
+        return (
+            abs(self.position[0] - self.ark_position[0]) < 0.5
+            and abs(self.position[1] - self.ark_position[1]) < 0.5
+        )
+
     def distance_to_ark(self) -> float:
         """Calculate distance to the ark"""
         dx = self.ark_position[0] - self.position[0]
