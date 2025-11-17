@@ -89,9 +89,9 @@ class Player7(Player):
         # Spread helpers in a circle around ark
         self._waiting_position = self._compute_waiting_position()
 
-    def check_surroundings(self, snap: HelperSurroundingsSnapshot) -> int:
-        self.last_snapshot = snap
-        self._update_state(snap)
+    def check_surroundings(self, snapshot: HelperSurroundingsSnapshot) -> int:
+        self.last_snapshot = snapshot
+        self._update_state(snapshot)
 
         # Initialize priorities on first turn
         if self.turn == 1 and self.kind != Kind.Noah:
@@ -101,11 +101,11 @@ class Player7(Player):
                 self.priorities.add((sid, 1))  # Female
 
         # Process ark view for communication
-        if snap.ark_view:
+        if snapshot.ark_view:
             import heapq
 
             current_ark = {
-                (a.species_id, a.gender.value) for a in snap.ark_view.animals
+                (a.species_id, a.gender.value) for a in snapshot.ark_view.animals
             }
             new_animals = current_ark - self.last_seen_ark_animals
 
@@ -184,7 +184,8 @@ class Player7(Player):
             if self.is_in_ark():
                 # In ark with full flock - offload everything
                 if len(self.flock) > 0:
-                    return Release(self.flock[0])
+                    for animal in self.flock:
+                        return Release(animal)
                 return None
             # Clear all active behaviors when offloading
             self._linger_until = 0
@@ -239,7 +240,8 @@ class Player7(Player):
                 return self._move_to(self.ark_position)
             # In ark with full flock - offload
             if len(self.flock) > 0:
-                return Release(self.flock[0])
+                for animal in self.flock:
+                    return Release(animal)
             return None
 
         return self._explore()
