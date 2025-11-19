@@ -141,6 +141,12 @@ class Player7(Player):
             self._stuck = 0
             t = self.territory
             return self._move_to((t["cx"], t["cy"]))
+        
+        if self.is_raining:
+            if not self.is_in_ark():
+                return Move(*self.move_towards(*self.ark_position))
+            else:
+                return None  # Already on ark
 
         if self._should_return():
             # When returning, prioritize getting to ark
@@ -365,15 +371,18 @@ class Player7(Player):
                     heapq.heappush(self.messages_to_send, b)
                     self.messages_sent.add(b)
 
-            # Legacy protocol support
-            female = (b >> 5) & 1
-            have = (b >> 6) & 1
-            claiming = (b >> 7) & 1
-            g = Gender.Female if female else Gender.Male
-            if have:
-                self._seen_carrying[(sid, g.value)] = self.turn
-            if claiming:
-                self._claimed[(sid, g.value)] = self.turn
+            # Legacy protocol support:
+            # Only apply for messages that DON'T use the new from_ark/from_local flags.
+            # This avoids misinterpreting our new encoding and corrupting `_claimed`.
+            if not from_ark and not from_local:
+                female = (b >> 5) & 1
+                have = (b >> 6) & 1
+                claiming = (b >> 7) & 1
+                g = Gender.Female if female else Gender.Male
+                if have:
+                    self._seen_carrying[(sid, g.value)] = self.turn
+                if claiming:
+                    self._claimed[(sid, g.value)] = self.turn
 
     # -------- Decision helpers --------
 
@@ -446,12 +455,12 @@ class Player7(Player):
                 for f in self.flock
             ):
                 continue
-            # Skip animals already in the ark
+            # Skip animals already in the ark (no extra value)
             if self._is_in_ark(a.species_id, a.gender):
                 continue
-            # Skip claimed targets from other helpers
-            if (a.species_id, a.gender.value) in self._claimed:
-                continue
+            # IMPORTANT: do NOT skip just because of `_claimed` here.
+            # If we're physically on the same cell as the animal, it's cheap
+            # to pick it up, even if another helper "claimed" that species+gender.
 
             # Prioritize animals in priority set
             is_priority = (a.species_id, a.gender.value) in self.priorities
@@ -938,3 +947,4 @@ class Player7(Player):
         dx = self.ark_position[0] - self.position[0]
         dy = self.ark_position[1] - self.position[1]
         return math.hypot(dx, dy)
+        
