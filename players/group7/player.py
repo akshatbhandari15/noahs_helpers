@@ -1,6 +1,7 @@
 """Player7: fresh helper redesign with stable pursuit and clear phases."""
 
 from __future__ import annotations
+
 import math
 from collections import deque
 
