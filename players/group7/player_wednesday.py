@@ -368,8 +368,8 @@ class Player7(Player):
                 curr_x, curr_y = self.position
                 dx = float(ark_x) - curr_x
                 dy = float(ark_y) - curr_y
-                dist = (dx*dx + dy*dy) ** 0.5
-                
+                dist = (dx * dx + dy * dy) ** 0.5
+
                 # If within reach, move directly to exact coordinates
                 if dist <= c.MAX_DISTANCE_KM * 0.99:
                     return Move(float(ark_x), float(ark_y))
@@ -1002,19 +1002,19 @@ class Player7(Player):
     def _move_to(self, pos: tuple[float, float]) -> Move:
         # Check if moving to ark position
         ark_x, ark_y = self.ark_position
-        
+
         # If target is the ark position
         if abs(pos[0] - ark_x) < c.EPS and abs(pos[1] - ark_y) < c.EPS:
             # Calculate if we can reach it
             curr_x, curr_y = self.position
             dx = float(ark_x) - curr_x
             dy = float(ark_y) - curr_y
-            dist = (dx*dx + dy*dy) ** 0.5
-            
+            dist = (dx * dx + dy * dy) ** 0.5
+
             # If within reach, move directly to exact integer coordinates
             if dist <= c.MAX_DISTANCE_KM * 0.99:
                 return Move(float(ark_x), float(ark_y))
-            
+
             # Otherwise, move towards it but will eventually reach exact coords
             next_x, next_y = self.move_towards(float(ark_x), float(ark_y))
             return Move(next_x, next_y)

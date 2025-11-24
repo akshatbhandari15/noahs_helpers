@@ -147,7 +147,9 @@ class Player7(Player):
             ]
         except Exception:
             flock_summary = []
-        print(f"[P7] t={self.turn} pos={self.position} flock={flock_summary}, territory={self.territory}")
+        print(
+            f"[P7] t={self.turn} pos={self.position} flock={flock_summary}, territory={self.territory}"
+        )
 
         # If in ark with empty flock
         if self.is_in_ark() and len(self.flock) == 0:
@@ -167,7 +169,7 @@ class Player7(Player):
                 # If time is tight (less than 50 turns buffer), go direct
                 if turns_to_ark + 50 >= left:
                     return None
-                
+
             t = self.territory
             return self._move_to((t["cx"], t["cy"]))
 
@@ -471,9 +473,7 @@ class Player7(Player):
             if a in self._ignored_animals:
                 continue
             if a in self.flock:
-                print(
-                    f"[P7] best_here skip: in flock sid={a.species_id} g={a.gender}"
-                )
+                print(f"[P7] best_here skip: in flock sid={a.species_id} g={a.gender}")
                 continue
             # Skip exact species+gender duplicates (we already carry one)
             if any(
@@ -486,15 +486,11 @@ class Player7(Player):
                 continue
             # Skip animals already in the ark
             if self._is_in_ark(a.species_id, a.gender):
-                print(
-                    f"[P7] best_here skip: in ark sid={a.species_id} g={a.gender}"
-                )
+                print(f"[P7] best_here skip: in ark sid={a.species_id} g={a.gender}")
                 continue
             # Skip claimed targets from other helpers
             if (a.species_id, a.gender.value) in self._claimed:
-                print(
-                    f"[P7] best_here skip: claimed sid={a.species_id} g={a.gender}"
-                )
+                print(f"[P7] best_here skip: claimed sid={a.species_id} g={a.gender}")
                 continue
 
             # Prioritize animals in priority set
@@ -911,10 +907,7 @@ class Player7(Player):
         # we are within EPS. This ensures helpers actually count as being
         # in the ark at the end of the game.
         ark_x, ark_y = self.ark_position
-        if (
-            abs(nx - ark_x) <= c.EPS
-            and abs(ny - ark_y) <= c.EPS
-        ):
+        if abs(nx - ark_x) <= c.EPS and abs(ny - ark_y) <= c.EPS:
             nx = float(ark_x)
             ny = float(ark_y)
 
