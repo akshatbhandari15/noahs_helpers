@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import math
-from collections import deque
+from collections import defaultdict, deque
 
 from core.action import Action, Move, Obtain, Release
 from core.message import Message
@@ -147,7 +147,7 @@ class Player7(Player):
             ]
         except Exception:
             flock_summary = []
-        print(f"[P7] t={self.turn} pos={self.position} flock={flock_summary}, territory={self.territory}")
+        # print(f"[P7] t={self.turn} pos={self.position} flock={flock_summary}, territory={self.territory}")
 
         # If in ark with empty flock
         if self.is_in_ark() and len(self.flock) == 0:
@@ -332,6 +332,39 @@ class Player7(Player):
                     "seen": self.turn,
                 }
 
+        # --- Stuck detection ---
+        if self.id == 39 and len(self._recent) >= 15:
+            # Compute bounding box of recent movement
+            xs = [x for x, y in self._recent]
+            ys = [y for x, y in self._recent]
+
+            span_x = max(xs) - min(xs)
+            span_y = max(ys) - min(ys)
+
+            # Has the helper stayed in ~1–2 cells?
+            CELL_STUCK_THRESHOLD = 1.2   # km (cell size = 1 km, adjust if different)
+
+            tiny_box = (span_x < CELL_STUCK_THRESHOLD and span_y < CELL_STUCK_THRESHOLD)
+
+            # Has helper had no valid target for a long time?
+            no_target = (self._tgt_cell is None)
+
+            # Is movement per tick tiny (jittering)?
+            # distance between last two recent points
+            dx = xs[-1] - xs[-2]
+            dy = ys[-1] - ys[-2]
+            step = (dx*dx + dy*dy)**0.5
+            tiny_step = step < 0.2    # matches your 0.02–0.15 patterns
+
+            if tiny_box and no_target and tiny_step:
+                print(
+                    f"[P7][BAD STUCK39] turn={self.turn} "
+                    f"pos={self.position} "
+                    f"span=({span_x:.2f},{span_y:.2f}) "
+                    f"step={step:.3f} "
+                    f"recent_cells={[ (int(x),int(y)) for x,y in self._recent ]}"
+                )
+
     def _encode_message(self) -> int:
         if not self.flock:
             return 0
@@ -471,30 +504,30 @@ class Player7(Player):
             if a in self._ignored_animals:
                 continue
             if a in self.flock:
-                print(
-                    f"[P7] best_here skip: in flock sid={a.species_id} g={a.gender}"
-                )
+                # print(
+                #     f"[P7] best_here skip: in flock helper_id={self.id} sid={a.species_id} g={a.gender}"
+                # )
                 continue
             # Skip exact species+gender duplicates (we already carry one)
             if any(
                 f.species_id == a.species_id and f.gender == a.gender
                 for f in self.flock
             ):
-                print(
-                    f"[P7] best_here skip: dup type in flock sid={a.species_id} g={a.gender}"
-                )
+                # print(
+                #     f"[P7] best_here skip: dup type in flock helper_id={self.id} sid={a.species_id} g={a.gender}"
+                # )
                 continue
             # Skip animals already in the ark
             if self._is_in_ark(a.species_id, a.gender):
-                print(
-                    f"[P7] best_here skip: in ark sid={a.species_id} g={a.gender}"
-                )
+                # print(
+                #     f"[P7] best_here skip: in ark helper_id={self.id} sid={a.species_id} g={a.gender}"
+                # )
                 continue
             # Skip claimed targets from other helpers
             if (a.species_id, a.gender.value) in self._claimed:
-                print(
-                    f"[P7] best_here skip: claimed sid={a.species_id} g={a.gender}"
-                )
+                # print(
+                #     f"[P7] best_here skip: claimed helper_id={self.id} sid={a.species_id} g={a.gender}"
+                # )
                 continue
 
             # Prioritize animals in priority set
@@ -569,15 +602,15 @@ class Player7(Player):
                     f.species_id == a.species_id and f.gender == a.gender
                     for f in self.flock
                 ):
-                    print(
-                        f"[P7] completer skip: dup type in flock sid={a.species_id} g={a.gender} at={(cv.x, cv.y)}"
-                    )
+                    # print(
+                    #     f"[P7] completer skip: dup type in flock sid={a.species_id} g={a.gender} at={(cv.x, cv.y)}"
+                    # )
                     continue
                 # Skip animals already in the ark
                 if self._is_in_ark(a.species_id, a.gender):
-                    print(
-                        f"[P7] completer skip: in ark sid={a.species_id} g={a.gender} at={(cv.x, cv.y)}"
-                    )
+                    # print(
+                    #     f"[P7] completer skip: in ark sid={a.species_id} g={a.gender} at={(cv.x, cv.y)}"
+                    # )
                     continue
                 if self._would_complete(a.species_id, a.gender):
                     cell_best = max(cell_best, self._value(a.species_id, a.gender))
@@ -600,6 +633,10 @@ class Player7(Player):
         if self.turn % 50 == 0:
             self._chase_attempts.clear()
             self._ignored_cells.clear()
+
+        if self.id == 39:
+            print(f"[DEBUG39][pursue] turn={self.turn} pos={self.position} "
+                f"tgt={self._tgt_cell} stuck={self._stuck} last_dist={self._last_dist}")
 
         # Check if we have an active target
         if (
@@ -642,21 +679,29 @@ class Player7(Player):
                 self._last_dist = None
                 self._stuck = 0
             else:
-                # Check if making progress toward target
+                # inside the active target check, where you compute distance
                 tx, ty = self._tgt_cell
                 dx = tx - self.position[0]
                 dy = ty - self.position[1]
                 d = max(0.0, math.hypot(dx, dy))
 
+                # print(f"[STUCK DEBUG] turn={self.turn} helper_id={self.id} target={self._tgt_cell} pos={self.position} d={d} _last_dist={self._last_dist} _stuck={self._stuck}")
+
                 if self._last_dist is not None:
                     if d >= self._last_dist - 1e-6:
                         self._stuck += 1
+                        # print(f"[STUCK DEBUG] turn={self.turn} helper_id={self.id} Incremented _stuck -> {self._stuck} because d >= _last_dist - 1e-6")
                     else:
                         self._stuck = 0
+                        # print(f"[STUCK DEBUG] turn={self.turn} helper_id={self.id} Reset _stuck to 0 because d < _last_dist - 1e-6")
 
                 self._last_dist = d
 
                 if self._stuck >= self.config["stuck_threshold"]:
+                    if self.id == 39:
+                        print(f"[DEBUG39][pursue] GIVE UP tgt={self._tgt_cell} stuck={self._stuck} "
+                        f"blocked_until={self.turn + self.config['give_up_turns']}")
+
                     # Give up on this target
                     self._blocked[self._tgt_cell] = (
                         self.turn + self.config["give_up_turns"]
@@ -671,6 +716,9 @@ class Player7(Player):
                     # Continue toward target only if still valuable
                     target_val = 0.0
                     for cv in snap.sight:
+                        num_helpers = len(cv.helpers)
+                        if num_helpers > 0:
+                            continue
                         if (cv.x, cv.y) == self._tgt_cell:
                             for a in cv.animals:
                                 if a in self._ignored_animals:
@@ -694,20 +742,34 @@ class Player7(Player):
                         self._tgt_cell = None
                         self._stuck = 0
 
-        # Find best animal to target
+                # Find best animal to target
         best_cell = None
         best_score = -1.0
 
         for cv in snap.sight:
             tx, ty = cv.x, cv.y
+
             if (tx, ty) == curr:
+                if self.id == 39:
+                    print(f"[DEBUG39][pursue] skip cell {(tx,ty)} reason=IS_CURRENT_CELL")
                 continue
+
+            num_helpers = len(cv.helpers)
+            if num_helpers > 0:
+                if self.id == 39:
+                    print(f"[DEBUG39][pursue] skip cell {(tx,ty)} reason=HELPERS_PRESENT")
+                continue
+
             # Skip cells we've explicitly decided to ignore
             if (tx, ty) in self._ignored_cells:
-                print(f"[P7] pursue skip ignored cell={(tx, ty)}")
+                if self.id == 39:
+                    print(f"[DEBUG39][pursue] skip cell {(tx,ty)} reason=IGNORED_CELL")
                 continue
+
             exp = self._blocked.get((tx, ty))
             if exp is not None and exp > self.turn:
+                if self.id == 39:
+                    print(f"[DEBUG39][pursue] skip cell {(tx,ty)} reason=BLOCKED_UNTIL_{exp}")
                 continue
 
             # Evaluate each animal in this cell
@@ -719,26 +781,26 @@ class Player7(Player):
                     for f in self.flock
                 ):
                     print(
-                        f"[P7] pursue skip: dup type in flock sid={a.species_id} g={a.gender} at={(tx, ty)}"
+                        f"[P7] pursue skip: dup type in flock helper_id={self.id} sid={a.species_id} g={a.gender} at={(tx, ty)}"
                     )
                     continue
                 # Skip animals already in the ark
                 if self._is_in_ark(a.species_id, a.gender):
-                    print(
-                        f"[P7] pursue skip: in ark sid={a.species_id} g={a.gender} at={(tx, ty)}"
-                    )
+                    # print(
+                    #     f"[P7] pursue skip: in ark helper_id={self.id} sid={a.species_id} g={a.gender} at={(tx, ty)}"
+                    # )
                     continue
                 if (a.species_id, a.gender.value) in self._claimed:
-                    print(
-                        f"[P7] pursue skip: claimed sid={a.species_id} g={a.gender} at={(tx, ty)}"
-                    )
+                    # print(
+                    #     f"[P7] pursue skip: claimed helper_id={self.id} sid={a.species_id} g={a.gender} at={(tx, ty)}"
+                    # )
                     continue
 
                 animal_val = self._value(a.species_id, a.gender)
                 if animal_val <= 0:
-                    print(
-                        f"[P7] pursue skip: low value={animal_val} sid={a.species_id} g={a.gender} at={(tx, ty)}"
-                    )
+                    # print(
+                    #     f"[P7] pursue skip: low value={animal_val} helper_id={self.id} sid={a.species_id} g={a.gender} at={(tx, ty)}"
+                    # )
                     continue
 
                 dx = tx - self.position[0]
@@ -762,9 +824,12 @@ class Player7(Player):
                     best_cell = (tx, ty)
 
         if best_cell is not None:
-            print(
-                f"[P7] pursue best_cell={best_cell} best_score={best_score} pos={self.position}"
-            )
+            if self.id == 39:
+                print(f"[DEBUG39][pursue-select] best_cell={best_cell} score={best_score}")
+
+            # print(
+            #     f"[P7] helper_id={self.id} pursue best_cell={best_cell} best_score={best_score} pos={self.position}"
+            # )
 
         if best_cell is None:
             # No valuable cells, clear history
@@ -776,9 +841,9 @@ class Player7(Player):
         # to not chase anything right now and continue exploration instead.
         if best_score < 1:
             if best_cell is not None:
-                print(
-                    f"[P7] pursue ignore low-score cell={best_cell} score={best_score}"
-                )
+                # print(
+                #     f"[P7] helper_id={self.id} pursue ignore low-score cell={best_cell} score={best_score}"
+                # )
                 self._ignored_cells.add(best_cell)
             return None
 
@@ -791,7 +856,16 @@ class Player7(Player):
         dy = best_cell[1] - self.position[1]
         self._last_dist = max(0.0, math.hypot(dx, dy))
         self._stuck = 0
-        print(f"[P7] pursue set target cell={best_cell} score={best_score}")
+        if self.id == 39:
+            print(f"[DEBUG39][pursue] NEW TARGET {best_cell} "
+                f"dist={math.hypot(best_cell[0]-self.position[0], best_cell[1]-self.position[1]):.2f} "
+                f"score={best_score}")
+
+        # print(f"[P7] helper_id={self.id} pursue set target cell={best_cell} score={best_score}")
+        if best_cell is None:
+            if self.id == 39:
+                print("[DBG39][pursue] NO_VALID_CELLS → returning None")
+            return None
         return self._move_to(best_cell)
 
     # -------- Scoring --------
@@ -813,10 +887,10 @@ class Player7(Player):
         # genders have been saved.
         if gender is None or gender == Gender.Unknown:
             in_ark = info.get(Gender.Male, False) and info.get(Gender.Female, False)
-            if in_ark:
-                print(
-                    f"[P7] _is_in_ark: skip unknown-gender of fully-saved species sid={sid}"
-                )
+            # if in_ark:
+            #     print(
+            #         f"[P7] helper_id={self.id} _is_in_ark: skip unknown-gender of fully-saved species sid={sid}"
+            #     )
             return in_ark
 
         return info.get(gender, False)
@@ -1003,15 +1077,50 @@ class Player7(Player):
         if current_row % 2 == 0:
             # Left to right sweep
             x_tgt = sweep_min_x + x_offset
+            if x_tgt >= sweep_max_x:
+                # Hit boundary: move down one row and start at left
+                current_row += 1
+                y_tgt = sweep_min_y + min(current_row * row_height, sweep_height)
+                x_tgt = sweep_min_x
         else:
             # Right to left sweep
             x_tgt = sweep_max_x - x_offset
+            if x_tgt <= sweep_min_x:
+                # Hit boundary: move down one row and start at right
+                current_row += 1
+                y_tgt = sweep_min_y + min(current_row * row_height, sweep_height)
+                x_tgt = sweep_max_x
 
-        # Clamp to sweep bounds
+        # Clamp as before for safety
         x_tgt = max(sweep_min_x, min(x_tgt, sweep_max_x))
         y_tgt = max(sweep_min_y, min(y_tgt, sweep_max_y))
 
+        # --- DEBUG: Is helper 39 near or outside sweep boundaries? ---
+        if self.id == 39:
+            at_x, at_y = int(self.position[0]), int(self.position[1])
+            near_x_min = abs(at_x - sweep_min_x) <= 2
+            near_x_max = abs(at_x - sweep_max_x) <= 2
+            near_y_min = abs(at_y - sweep_min_y) <= 2
+            near_y_max = abs(at_y - sweep_max_y) <= 2
+
+            if near_x_min or near_x_max or near_y_min or near_y_max:
+                print(f"[D39][near-boundary] turn={self.turn} pos=({at_x},{at_y}) "
+                    f"sweep=({sweep_min_x},{sweep_min_y})→({sweep_max_x},{sweep_max_y}) "
+                    f"near=({near_x_min=},{near_x_max=},{near_y_min=},{near_y_max=}) "
+                    f"tgt=({x_tgt},{y_tgt})")
+
+            # Also detect if the target = boundary (common jitter cause)
+            tgt_on_boundary = (
+                x_tgt == sweep_min_x or x_tgt == sweep_max_x or
+                y_tgt == sweep_min_y or y_tgt == sweep_max_y
+            )
+
+            if tgt_on_boundary:
+                print(f"[D39][tgt-on-boundary] turn={self.turn} "
+                    f"tgt=({x_tgt},{y_tgt}) sweep_range=({sweep_min_x},{sweep_min_y})→({sweep_max_x},{sweep_max_y})")
+
         return self._move_to((x_tgt, y_tgt))
+
 
     # -------- Setup helpers --------
 
