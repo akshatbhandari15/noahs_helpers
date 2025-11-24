@@ -671,6 +671,9 @@ class Player7(Player):
                     # Continue toward target only if still valuable
                     target_val = 0.0
                     for cv in snap.sight:
+                        num_helpers = len(cv.helpers)
+                        if num_helpers > 0:
+                            continue
                         if (cv.x, cv.y) == self._tgt_cell:
                             for a in cv.animals:
                                 if a in self._ignored_animals:
@@ -702,6 +705,11 @@ class Player7(Player):
             tx, ty = cv.x, cv.y
             if (tx, ty) == curr:
                 continue
+
+            num_helpers = len(cv.helpers)
+            if num_helpers > 0:
+                continue
+
             # Skip cells we've explicitly decided to ignore
             if (tx, ty) in self._ignored_cells:
                 print(f"[P7] pursue skip ignored cell={(tx, ty)}")
