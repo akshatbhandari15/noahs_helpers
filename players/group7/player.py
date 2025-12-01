@@ -45,6 +45,9 @@ class Player7(Player):
         # Linear formation state (optional for coordinated sweeps)
         self._formation_spacing = c.MAX_SIGHT_KM * 0.8  # Stay within sight
 
+        # Deterministic sweep state within territory
+        self._sweep_index: int | None = None
+
         # State
         self.turn = 0
         self.is_raining = False
@@ -55,6 +58,13 @@ class Player7(Player):
         # Knowledge
         self.ark_status: dict[int, dict] = {}
         self.known: dict[tuple[int, int, int], dict] = {}
+
+        # Simple statistics for experiments/reporting
+        self.stats = {
+            "cells_in_territory": set(),
+            "cells_out_territory": set(),
+            "animals_collected": set(),
+        }
 
         # Behavior
         self._intend_obtain = False
@@ -147,9 +157,9 @@ class Player7(Player):
             ]
         except Exception:
             flock_summary = []
-        print(
-            f"[P7] t={self.turn} pos={self.position} flock={flock_summary}, territory={self.territory}"
-        )
+        # print(
+        #     f"[P7] t={self.turn} pos={self.position} flock={flock_summary}, territory={self.territory}"
+        # )
 
         # If in ark with empty flock
         if self.is_in_ark() and len(self.flock) == 0:
@@ -296,11 +306,27 @@ class Player7(Player):
         # Mark current position and all visible cells as explored
         curr_cell = (int(self.position[0]), int(self.position[1]))
         self._explored.add(curr_cell)
+
+        # Track unique cells this helper has visited inside vs outside territory
+        t = self.territory
+        if (
+            t["min_x"] <= curr_cell[0] <= t["max_x"]
+            and t["min_y"] <= curr_cell[1] <= t["max_y"]
+        ):
+            self.stats["cells_in_territory"].add(curr_cell)
+        else:
+            self.stats["cells_out_territory"].add(curr_cell)
+
         for cv in snap.sight:
             self._explored.add((cv.x, cv.y))
 
-        prev = len(self.flock)
+        prev_flock = set(self.flock)
         self.flock = snap.flock.copy()
+
+        # Track unique animals collected by this helper
+        new_animals = set(self.flock) - prev_flock
+        if new_animals:
+            self.stats["animals_collected"].update(new_animals)
 
         expired = [p for p, t in self._blocked.items() if t <= self.turn]
         for p in expired:
@@ -314,9 +340,11 @@ class Player7(Player):
                 del self._blocked[p]
 
         if self._intend_obtain:
-            if len(self.flock) > prev:
+            # If flock grew since last turn, we successfully obtained something
+            if len(self.flock) > len(prev_flock):
                 self._linger_until = self.turn + self.config["linger_turns"]
             else:
+                # Treat this cell as failed for a while to avoid re-trying
                 cx, cy = int(self.position[0]), int(self.position[1])
                 self._blocked[(cx, cy)] = self.turn + self.config["block_after_fail"]
         self._intend_obtain = False
@@ -473,24 +501,24 @@ class Player7(Player):
             if a in self._ignored_animals:
                 continue
             if a in self.flock:
-                print(f"[P7] best_here skip: in flock sid={a.species_id} g={a.gender}")
+                #print(f"[P7] best_here skip: in flock sid={a.species_id} g={a.gender}")
                 continue
             # Skip exact species+gender duplicates (we already carry one)
             if any(
                 f.species_id == a.species_id and f.gender == a.gender
                 for f in self.flock
             ):
-                print(
-                    f"[P7] best_here skip: dup type in flock sid={a.species_id} g={a.gender}"
-                )
+                # print(
+                #     f"[P7] best_here skip: dup type in flock sid={a.species_id} g={a.gender}"
+                # )
                 continue
             # Skip animals already in the ark
             if self._is_in_ark(a.species_id, a.gender):
-                print(f"[P7] best_here skip: in ark sid={a.species_id} g={a.gender}")
+                # print(f"[P7] best_here skip: in ark sid={a.species_id} g={a.gender}")
                 continue
             # Skip claimed targets from other helpers
             if (a.species_id, a.gender.value) in self._claimed:
-                print(f"[P7] best_here skip: claimed sid={a.species_id} g={a.gender}")
+                # print(f"[P7] best_here skip: claimed sid={a.species_id} g={a.gender}")
                 continue
 
             # Prioritize animals in priority set
@@ -565,15 +593,15 @@ class Player7(Player):
                     f.species_id == a.species_id and f.gender == a.gender
                     for f in self.flock
                 ):
-                    print(
-                        f"[P7] completer skip: dup type in flock sid={a.species_id} g={a.gender} at={(cv.x, cv.y)}"
-                    )
+                    # print(
+                    #     f"[P7] completer skip: dup type in flock sid={a.species_id} g={a.gender} at={(cv.x, cv.y)}"
+                    # )
                     continue
                 # Skip animals already in the ark
                 if self._is_in_ark(a.species_id, a.gender):
-                    print(
-                        f"[P7] completer skip: in ark sid={a.species_id} g={a.gender} at={(cv.x, cv.y)}"
-                    )
+                    # print(
+                    #     f"[P7] completer skip: in ark sid={a.species_id} g={a.gender} at={(cv.x, cv.y)}"
+                    # )
                     continue
                 if self._would_complete(a.species_id, a.gender):
                     cell_best = max(cell_best, self._value(a.species_id, a.gender))
@@ -708,7 +736,7 @@ class Player7(Player):
 
             # Skip cells we've explicitly decided to ignore
             if (tx, ty) in self._ignored_cells:
-                print(f"[P7] pursue skip ignored cell={(tx, ty)}")
+                # print(f"[P7] pursue skip ignored cell={(tx, ty)}")
                 continue
             exp = self._blocked.get((tx, ty))
             if exp is not None and exp > self.turn:
@@ -722,27 +750,27 @@ class Player7(Player):
                     f.species_id == a.species_id and f.gender == a.gender
                     for f in self.flock
                 ):
-                    print(
-                        f"[P7] pursue skip: dup type in flock sid={a.species_id} g={a.gender} at={(tx, ty)}"
-                    )
+                    # print(
+                    #     f"[P7] pursue skip: dup type in flock sid={a.species_id} g={a.gender} at={(tx, ty)}"
+                    # )
                     continue
                 # Skip animals already in the ark
                 if self._is_in_ark(a.species_id, a.gender):
-                    print(
-                        f"[P7] pursue skip: in ark sid={a.species_id} g={a.gender} at={(tx, ty)}"
-                    )
+                    # print(
+                    #     f"[P7] pursue skip: in ark sid={a.species_id} g={a.gender} at={(tx, ty)}"
+                    # )
                     continue
                 if (a.species_id, a.gender.value) in self._claimed:
-                    print(
-                        f"[P7] pursue skip: claimed sid={a.species_id} g={a.gender} at={(tx, ty)}"
-                    )
+                    # print(
+                    #     f"[P7] pursue skip: claimed sid={a.species_id} g={a.gender} at={(tx, ty)}"
+                    # )
                     continue
 
                 animal_val = self._value(a.species_id, a.gender)
                 if animal_val <= 0:
-                    print(
-                        f"[P7] pursue skip: low value={animal_val} sid={a.species_id} g={a.gender} at={(tx, ty)}"
-                    )
+                    # print(
+                    #     f"[P7] pursue skip: low value={animal_val} sid={a.species_id} g={a.gender} at={(tx, ty)}"
+                    # )
                     continue
 
                 dx = tx - self.position[0]
@@ -765,10 +793,10 @@ class Player7(Player):
                     best_score = score
                     best_cell = (tx, ty)
 
-        if best_cell is not None:
-            print(
-                f"[P7] pursue best_cell={best_cell} best_score={best_score} pos={self.position}"
-            )
+        # if best_cell is not None:
+        #     print(
+        #         f"[P7] pursue best_cell={best_cell} best_score={best_score} pos={self.position}"
+        #     )
 
         if best_cell is None:
             # No valuable cells, clear history
@@ -780,9 +808,9 @@ class Player7(Player):
         # to not chase anything right now and continue exploration instead.
         if best_score < 1:
             if best_cell is not None:
-                print(
-                    f"[P7] pursue ignore low-score cell={best_cell} score={best_score}"
-                )
+                # print(
+                #     f"[P7] pursue ignore low-score cell={best_cell} score={best_score}"
+                # )
                 self._ignored_cells.add(best_cell)
             return None
 
@@ -817,10 +845,10 @@ class Player7(Player):
         # genders have been saved.
         if gender is None or gender == Gender.Unknown:
             in_ark = info.get(Gender.Male, False) and info.get(Gender.Female, False)
-            if in_ark:
-                print(
-                    f"[P7] _is_in_ark: skip unknown-gender of fully-saved species sid={sid}"
-                )
+            #if in_ark:
+                # print(
+                #     f"[P7] _is_in_ark: skip unknown-gender of fully-saved species sid={sid}"
+                # )
             return in_ark
 
         return info.get(gender, False)
@@ -914,103 +942,60 @@ class Player7(Player):
         return Move(nx, ny)
 
     def _explore(self) -> Move:
-        """Explore territory with formation-aware coordination."""
+        """Deterministic serpentine sweep within biased-outward territory."""
+
+        # Late-game safety: don't explore beyond safe return distance
+        if self.time_elapsed >= 1008:
+            dist_to_ark = self._dist_to_ark()
+            max_safe_distance = (c.START_RAIN - 150) * c.MAX_DISTANCE_KM
+            if dist_to_ark > max_safe_distance:
+                return self._move_to(self.ark_position)
+
         t = self.territory
         min_x, max_x = t["min_x"], t["max_x"]
         min_y, max_y = t["min_y"], t["max_y"]
 
-        # First 7 days (1008 turns): explore entire field
-        # After 7 days: stay within 7-day return distance from ark
-        if self.time_elapsed >= 1008:
-            # After 7 days, limit exploration to safe return radius
-            # Safe distance = 7 days worth of travel minus safety buffer
-            max_safe_distance = (c.START_RAIN - 150) * c.MAX_DISTANCE_KM
-            ark_x, ark_y = self.ark_position
-
-            # Calculate safe exploration bounds as a circle around ark
-            safe_min_x = max(0, int(ark_x - max_safe_distance))
-            safe_max_x = min(c.X - 1, int(ark_x + max_safe_distance))
-            safe_min_y = max(0, int(ark_y - max_safe_distance))
-            safe_max_y = min(c.Y - 1, int(ark_y + max_safe_distance))
-
-            # Intersect with territory bounds
-            min_x = max(min_x, safe_min_x)
-            max_x = min(max_x, safe_max_x)
-            min_y = max(min_y, safe_min_y)
-            max_y = min(max_y, safe_max_y)
-
-            # Periodically clear explored set within safe zone
-            # This ensures helpers keep exploring rather than idling
-            if self.turn % 500 == 0:
-                # Keep explored cells outside safe zone marked
-                safe_explored = {
-                    (x, y)
-                    for (x, y) in self._explored
-                    if x < safe_min_x
-                    or x > safe_max_x
-                    or y < safe_min_y
-                    or y > safe_max_y
-                }
-                self._explored = safe_explored
-
-        # Check if too far from ark (beyond safe return distance)
-        dist_to_ark = self._dist_to_ark()
-        if self.time_elapsed >= 1008:
-            max_safe_distance = (c.START_RAIN - 150) * c.MAX_DISTANCE_KM
-            if dist_to_ark > max_safe_distance:
-                # Too far! Return toward ark immediately
-                return self._move_to(self.ark_position)
-
-        # Systematic sweep pattern within territory
         if min_x > max_x or min_y > max_y:
-            # Invalid bounds, move to ark
             return self._move_to(self.ark_position)
 
+        # Use a small interior margin to avoid edges
         width = max(1, max_x - min_x)
         height = max(1, max_y - min_y)
+        margin = min(3, width // 4, height // 4)
 
-        # Use a continuous sweep pattern that avoids boundary edges
-        # Add margin from edges to prevent getting stuck
-        margin = min(3, width // 4, height // 4)  # Adaptive margin
-
-        # Constrain sweep to interior
         sweep_min_x = min_x + margin
         sweep_max_x = max_x - margin
         sweep_min_y = min_y + margin
         sweep_max_y = max_y - margin
 
-        # If territory too small, just use original bounds
-        if sweep_min_x >= sweep_max_x or sweep_min_y >= sweep_max_y:
+        if sweep_min_x > sweep_max_x or sweep_min_y > sweep_max_y:
             sweep_min_x, sweep_max_x = min_x, max_x
             sweep_min_y, sweep_max_y = min_y, max_y
 
-        sweep_width = max(1, sweep_max_x - sweep_min_x)
-        sweep_height = max(1, sweep_max_y - sweep_min_y)
+        # Discrete serpentine waypoints across territory
+        width_i = max(1, sweep_max_x - sweep_min_x + 1)
+        height_i = max(1, sweep_max_y - sweep_min_y + 1)
+        total_cells = width_i * height_i
 
-        # Zigzag sweep through interior
-        row_height = c.MAX_SIGHT_KM * 2
-        num_rows = max(1, int(sweep_height / row_height) + 1)
+        if self._sweep_index is None:
+            # Stagger starting index based on helper id to further decorrelate
+            self._sweep_index = (self.id * (total_cells // max(1, self.num_helpers))) % total_cells
 
-        # Calculate position in sweep cycle
-        cycle_length = max(1, sweep_width * num_rows)
-        position_in_cycle = (self.turn + self.id * 100) % cycle_length
-        current_row = position_in_cycle // max(1, sweep_width)
-        x_offset = position_in_cycle % max(1, sweep_width)
+        idx = self._sweep_index % total_cells
+        row = idx // width_i
+        col = idx % width_i
 
-        # Y position (which row)
-        y_tgt = sweep_min_y + min(current_row * row_height, sweep_height)
-
-        # X position (progress within row)
-        if current_row % 2 == 0:
-            # Left to right sweep
-            x_tgt = sweep_min_x + x_offset
+        # Serpentine: even rows L->R, odd rows R->L
+        if row % 2 == 0:
+            x_tgt = sweep_min_x + col
         else:
-            # Right to left sweep
-            x_tgt = sweep_max_x - x_offset
+            x_tgt = sweep_max_x - col
+        y_tgt = sweep_min_y + row
 
-        # Clamp to sweep bounds
-        x_tgt = max(sweep_min_x, min(x_tgt, sweep_max_x))
-        y_tgt = max(sweep_min_y, min(y_tgt, sweep_max_y))
+        # Advance index when we are close enough to current waypoint
+        cur_x, cur_y = self.position
+        if abs(cur_x - x_tgt) <= 0.5 and abs(cur_y - y_tgt) <= 0.5:
+            self._sweep_index = (self._sweep_index + 1) % total_cells
 
         return self._move_to((x_tgt, y_tgt))
 
@@ -1046,27 +1031,79 @@ class Player7(Player):
         return out
 
     def _compute_territory(self) -> dict[str, int]:
-        # Compute grid dimensions to fit all helpers
-        # Use ceiling of sqrt to ensure enough cells
-        n = max(1, math.ceil(math.sqrt(self.num_helpers)))
+        # Aspect-aware grid so territories are closer to square even when
+        # c.X != c.Y. Each helper gets roughly equal area, but we
+        # bias territories outward from the ark. With many helpers,
+        # the inner region near the ark is covered mostly by transit
+        # (fan-out and returns), so systematic sweeps focus further out.
+        if self.num_helpers <= 0:
+            return {
+                "min_x": 0,
+                "max_x": c.X - 1,
+                "min_y": 0,
+                "max_y": c.Y - 1,
+                "cx": c.X // 2,
+                "cy": c.Y // 2,
+            }
 
-        # If n×n is still not enough (shouldn't happen), increase n
-        while n * n < self.num_helpers:
-            n += 1
+        # Choose number of columns proportional to field aspect ratio.
+        cols = max(1, math.ceil(math.sqrt(self.num_helpers * c.X / c.Y)))
+        rows = max(1, math.ceil(self.num_helpers / cols))
 
-        size = c.X / n
-        row = self.id // n
-        col = self.id % n
-        sx = col * size
-        sy = row * size
+        cell_width = c.X / cols
+        cell_height = c.Y / rows
+
+        row = self.id // cols
+        col = self.id % cols
+        sx = col * cell_width
+        sy = row * cell_height
+
+        min_x = int(sx)
+        max_x = int(min(sx + cell_width, c.X - 1))
+        min_y = int(sy)
+        max_y = int(min(sy + cell_height, c.Y - 1))
+
+        # Bias rectangle outward from ark depending on number of helpers.
+        # More helpers -> stronger outward push so inner region near ark
+        # is left to natural transit coverage.
+        ark_x, ark_y = self.ark_position
+        cx = (min_x + max_x) // 2
+        cy = (min_y + max_y) // 2
+
+        # Direction from ark to territory center
+        dx = cx - ark_x
+        dy = cy - ark_y
+        dist = math.hypot(dx, dy)
+
+        # Target minimum radius for territory centers
+        # Base radius plus a term that grows with sqrt of helpers
+        base_radius = min(c.X, c.Y) * 0.15
+        helper_boost = math.sqrt(max(1, self.num_helpers)) * (min(c.X, c.Y) * 0.02)
+        target_radius = base_radius + helper_boost
+
+        if dist > 1e-6 and dist < target_radius:
+            scale = target_radius / dist
+            new_cx = ark_x + dx * scale
+            new_cy = ark_y + dy * scale
+        else:
+            new_cx, new_cy = float(cx), float(cy)
+
+        # Recenter rectangle around new center, preserving size
+        half_w = (max_x - min_x) / 2.0
+        half_h = (max_y - min_y) / 2.0
+
+        min_x = int(max(0, min(c.X - 1, new_cx - half_w)))
+        max_x = int(max(0, min(c.X - 1, new_cx + half_w)))
+        min_y = int(max(0, min(c.Y - 1, new_cy - half_h)))
+        max_y = int(max(0, min(c.Y - 1, new_cy + half_h)))
 
         return {
-            "min_x": int(sx),
-            "max_x": int(min(sx + size, c.X - 1)),
-            "min_y": int(sy),
-            "max_y": int(min(sy + size, c.Y - 1)),
-            "cx": int(sx + size / 2),
-            "cy": int(sy + size / 2),
+            "min_x": min_x,
+            "max_x": max_x,
+            "min_y": min_y,
+            "max_y": max_y,
+            "cx": int((min_x + max_x) / 2),
+            "cy": int((min_y + max_y) / 2),
         }
 
     # -------- Utils --------
