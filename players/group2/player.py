@@ -1,3 +1,4 @@
+import math
 from random import choice, randint
 
 from core.action import Action, Move, Obtain
@@ -47,6 +48,40 @@ class Player2(Player):
         self.grid_size = 100
         self.visited_cells = set()
         self.current_target_cell = None
+
+        self.zigzag_phase = 1  # +1 or -1
+        self.zigzag_angle = 25  # degrees of sideways wiggle
+
+    def _apply_zigzag(self, target: tuple[float, float]) -> tuple[float, float]:
+        """Return an overarching zig-zag target toward a point for helpers to explore more overall"""
+        tx, ty = target
+        px, py = self.position
+
+        # Compute forward direction vector
+        dx = tx - px
+        dy = ty - py
+        dist = max(1e-9, math.sqrt(dx * dx + dy * dy))
+        # Normalize
+        dx /= dist
+        dy /= dist
+
+        # Rotate by zigzag angle
+        angle_rad = math.radians(self.zigzag_angle * self.zigzag_phase)
+        self.zigzag_phase *= -1  # Flip direction next time
+
+        zx = dx * math.cos(angle_rad) - dy * math.sin(angle_rad)
+        zy = dx * math.sin(angle_rad) + dy * math.cos(angle_rad)
+
+        # TUNE LATER: step outward ~50 distance
+        scale = 50
+        new_x = px + zx * scale
+        new_y = py + zy * scale
+
+        # clamp inside bounding box
+        new_x = max(0, min(1000, new_x))
+        new_y = max(0, min(1000, new_y))
+
+        return new_x, new_y
 
     def _get_my_cell(self) -> CellView:
         xcell, ycell = tuple(map(int, self.position))
@@ -282,7 +317,9 @@ class Player2(Player):
             direction = self._get_next_grid_target()
             self.mode = "moving"
             self.direction = direction
-            return Move(*self.move_towards(*self.direction))
+            # return Move(*self.move_towards(*self.direction))
+            zig = self._apply_zigzag(self.direction)
+            return Move(*self.move_towards(*zig))
         else:
             # Check if we've reached our target grid cell
             if self.current_target_cell:
@@ -292,7 +329,9 @@ class Player2(Player):
                     direction = self._get_next_grid_target()
                     self.mode = "moving"
                     self.direction = direction
-                    return Move(*self.move_towards(*self.direction))
+                    # return Move(*self.move_towards(*self.direction))
+                    zig = self._apply_zigzag(self.direction)
+                    return Move(*self.move_towards(*zig))
 
             # Check if close to direction target
             if distance(*self.position, *self.direction) < 10:
@@ -300,7 +339,9 @@ class Player2(Player):
                 direction = self._get_next_grid_target()
                 self.mode = "moving"
                 self.direction = direction
-                return Move(*self.move_towards(*self.direction))
+                # return Move(*self.move_towards(*self.direction))
+                zig = self._apply_zigzag(self.direction)
+                return Move(*self.move_towards(*zig))
             else:
                 # Keep moving toward current target
                 return Move(*self.move_towards(*self.direction))

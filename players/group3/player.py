@@ -32,6 +32,8 @@ class Player3(Player):
         samples, total_weight = self.angle_weights()
         self.angle = self.find_angle(samples, total_weight)
         self.cooldowns = {}
+        self.days_remaining = 1008
+        self.next_move = 0
 
     def check_surroundings(self, snapshot: HelperSurroundingsSnapshot) -> int:
         self.position = snapshot.position
@@ -74,8 +76,20 @@ class Player3(Player):
 
         # If it's raining, go to ark
         if self.is_raining:
-            return Move(*self.move_towards(*self.ark_position))
+            self.days_remaining -= 1
+            if (
+                distance(*self.position, self.ark_position[0], self.ark_position[1])
+                >= self.days_remaining - 12
+            ):
+                # move towards ark if we need a lot of steps to get to ark
+                # otherwise keep searching
+                if self.next_move > 0:
+                    self.next_move -= 1
+                return Move(*self.move_towards(*self.ark_position))
 
+        if self.next_move > 0:
+            self.next_move -= 1
+            return Move(*self.move_dir())
         # If I am holding an animal that exists in my ark memory, drop it and add a cooldown
         ark_memory_info = set()
         for animal in self.ark_species or []:
@@ -83,13 +97,17 @@ class Player3(Player):
         for animal in self.flock:
             if (animal.species_id, animal.gender) in ark_memory_info:
                 self.cooldowns[animal.species_id] = 20  # e.g., 5 turns cooldown
+                self.angle = math.radians(random() * 360)
+                self.next_move = 5
                 return Release(animal)  # Drop the animal
 
         # if self.is_flock_full():
         #     return Move(*self.move_towards(*self.ark_position))
 
         # If I have obtained an animal, go to ark
-        if not self.is_flock_empty():
+        # if not self.is_flock_empty():
+        if self.is_flock_full():
+            # if len(self.flock) >= 4:
             return Move(*self.move_towards(*self.ark_position))
 
         # If I've reached an animal, I'll obtain it
@@ -101,9 +119,9 @@ class Player3(Player):
             return Obtain(random_animal) """
 
         # don't move too far from the ark
-        if distance(*self.position, self.ark_position[0], self.ark_position[1]) >= 1007:
+        if distance(*self.position, self.ark_position[0], self.ark_position[1]) >= 997:
             self.angle = math.radians(random() * 360)
-            print("distance too far")
+            # print("distance too far")
             return Move(*self.move_towards(*self.ark_position))
 
         cellview = self._get_my_cell()
@@ -112,15 +130,16 @@ class Player3(Player):
         free_animals = self.get_free_animals_in_cell(cellview)
         if len(free_animals) > 0:
             animal_to_obtain = choice(tuple(free_animals))
-            print("obtained free animal")
+            print(f"Helper {self.id}: Obtained animal into flock")
+            print(f"Helper {self.id}: New flock size: {len(self.flock) + 1}")
             return Obtain(animal_to_obtain)
 
         # If I see any animals, I'll chase the closest one
         closest_animal = self._find_closest_desirable_animal()
         if closest_animal:
             dist_animal = distance(*self.position, *closest_animal)
-            if dist_animal > 0.01 and dist_animal <= 3:
-                print("move towards animal")
+            if dist_animal > 0.01:
+                # print(f"Helper {self.id}: Moving towards animal")
                 # This means the random_player will even approach
                 # animals in other helpers' flocks
                 return Move(*self.move_towards(*closest_animal))
@@ -139,6 +158,9 @@ class Player3(Player):
         return self.sight.get_cellview_at(xcell, ycell)
 
     def _find_closest_desirable_animal(self) -> tuple[int, int] | None:
+        cur_flock_animal_types = set()
+        for animal in self.flock:
+            cur_flock_animal_types.add(animal.species_id)
         closest_animal = None
         closest_dist = -1
         closest_pos = None
@@ -150,12 +172,18 @@ class Player3(Player):
                 if closest_animal is None or dist < closest_dist:
                     desirable_animals = []
                     for animal in cellview.animals:
-                        if self.should_pursue_animal(animal):  # type: ignore
-                            desirable_animals.append(animal)
-                        else:
+                        if not self.should_pursue_animal(animal):  # type: ignore
                             print(
                                 f"Not pursuing animal {animal.species_id} as both genders are already in ark."
                             )
+                            continue
+                        if animal.species_id in cur_flock_animal_types:
+                            print(
+                                f"Not pursuing animal {animal.species_id} as it's already in flock."
+                            )
+                            continue
+                        # print(f"Helper {self.id}: Considering animal {animal.species_id} at cell ({cellview.x}, {cellview.y})")
+                        desirable_animals.append(animal)
                     # closest_animal = choice(tuple(cellview.animals))
                     if len(desirable_animals) == 0:
                         continue
@@ -175,7 +203,7 @@ class Player3(Player):
         if self.can_move_to(x1, y1):
             # print(x1, y1)
             return x1, y1
-        print("move away")
+        # print("move away")
         self.angle = math.radians(random() * 360)
         return x0, y0
 

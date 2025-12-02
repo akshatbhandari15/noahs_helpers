@@ -16,6 +16,8 @@ from .sector_manager import SectorManager
 # Constants
 TARGET_REACHED_DELTA = 5.0
 RAIN_COUNTDOWN_START = 990
+RAIN_DISTANCE_MARGIN = 20.0
+MAX_RAIN_RANDOM_ATTEMPTS = 20
 CHECKED_ANIMAL_RADIUS = 3
 CHECKED_ANIMAL_EXPIRY_TURNS = 50
 MAX_RECENT_UPDATES = 4
@@ -28,8 +30,19 @@ RELEASE_DISTANCE_FROM_ARK = 50.0
 NO_ANIMAL_ADDED_RETURN_TURNS = 500
 SWEEP_RING_STEP_KM = 10.0
 SWEEP_ARC_SPACING_KM = 10.0
+RAIN_AGGRESSIVE_SWEEP_STEP_MULTIPLIER = (
+    1.5  # Increase step size during rain when time allows
+)
+RAIN_AGGRESSIVE_SWEEP_THRESHOLD = 500  # Use aggressive step when rain_countdown > this
+PRE_RAIN_AGGRESSIVE_SWEEP_TURN = 1500  # Start aggressive exploration when turn > this
+PRE_RAIN_SWEEP_STEP_MULTIPLIER = 1.3  # Increase step size pre-rain when time allows
+COVERAGE_PRIORITY_TURN = 1000  # Start prioritizing unvisited cells after this turn
+EDGE_DISTANCE_THRESHOLD = 50  # Cells within this distance of map edge are "edge cells"
 REVISIT_COOLDOWN_TURNS = 600
 RANDOM_TARGET_PROBABILITY = 0.5
+COVERAGE_RANDOM_PROBABILITY = (
+    0.7  # Higher random probability when prioritizing coverage
+)
 
 
 def distance(x1: float, y1: float, x2: float, y2: float) -> float:
@@ -401,9 +414,23 @@ class Player8(Player):
         dist = distance(*self.position, *self.target_position)
         return dist <= TARGET_REACHED_DELTA
 
+    def _effective_sweep_ring_step(self) -> float:
+        """Get the effective sweep ring step, larger during rain or late pre-rain when time allows."""
+        step = SWEEP_RING_STEP_KM
+        if (
+            self.is_raining
+            and self.rain_countdown is not None
+            and self.rain_countdown > RAIN_AGGRESSIVE_SWEEP_THRESHOLD
+        ):
+            step *= RAIN_AGGRESSIVE_SWEEP_STEP_MULTIPLIER
+        elif not self.is_raining and self.current_turn > PRE_RAIN_AGGRESSIVE_SWEEP_TURN:
+            step *= PRE_RAIN_SWEEP_STEP_MULTIPLIER
+        return step
+
     def _reset_sweep_ring(self):
         """Prepare sweep parameters for the current ring."""
-        r = max(0.0, self._sweep_ring_index * SWEEP_RING_STEP_KM)
+        step = self._effective_sweep_ring_step()
+        r = max(0.0, self._sweep_ring_index * step)
         # Ensure at least a handful of points even for small r
         if r < 1e-6:
             self._sweep_points_in_ring = 8
@@ -418,10 +445,89 @@ class Player8(Player):
         cutoff = self.current_turn - REVISIT_COOLDOWN_TURNS
         return {cell for cell, t in self.last_seen.items() if t > cutoff}
 
+    def _is_edge_cell(self, x: int, y: int) -> bool:
+        """Check if a cell is near the map edge (corner/edge area)."""
+        return (
+            x < EDGE_DISTANCE_THRESHOLD
+            or x >= c.X - EDGE_DISTANCE_THRESHOLD
+            or y < EDGE_DISTANCE_THRESHOLD
+            or y >= c.Y - EDGE_DISTANCE_THRESHOLD
+        )
+
+    def _get_unvisited_cells_in_sector(self) -> list[tuple[int, int]]:
+        """Get unvisited cells in this helper's sector, prioritizing edge/corner cells."""
+        sector_cells = self.sector_manager._get_all_cells_in_sector()
+        unvisited = [
+            cell
+            for cell in sector_cells
+            if cell not in self.visited_cells and cell not in self._recently_seen_set()
+        ]
+
+        # Prioritize edge/corner cells
+        edge_cells = [
+            cell for cell in unvisited if self._is_edge_cell(cell[0], cell[1])
+        ]
+        non_edge_cells = [
+            cell for cell in unvisited if not self._is_edge_cell(cell[0], cell[1])
+        ]
+
+        # Return edge cells first, then others
+        return edge_cells + non_edge_cells
+
+    def _get_coverage_priority_target(self) -> tuple[float, float] | None:
+        """Get a target from unvisited cells in sector, prioritizing coverage."""
+        unvisited = self._get_unvisited_cells_in_sector()
+        if not unvisited:
+            return None
+
+        # Prefer cells that are far from ark (explore outward)
+        unvisited_with_dist = [
+            (cell, distance(cell[0] + 0.5, cell[1] + 0.5, *self.ark_position))
+            for cell in unvisited
+        ]
+        # Sort by distance (farther = higher priority) but also consider edge priority
+        unvisited_with_dist.sort(
+            key=lambda x: (
+                0 if self._is_edge_cell(x[0][0], x[0][1]) else 1,  # Edge cells first
+                -x[1],  # Then by distance (negative for descending)
+            )
+        )
+
+        # Pick from top candidates (top 20% or at least top 5)
+        top_n = max(5, len(unvisited_with_dist) // 5)
+        selected = unvisited_with_dist[:top_n]
+        if selected:
+            cell, _ = selected[int(random() * len(selected))]
+            return (float(cell[0]) + 0.5, float(cell[1]) + 0.5)
+
+        return None
+
     def _get_random_target(self) -> tuple[float, float]:
         """Pick a random target in sector, excluding recently seen cells."""
         recently_seen = self._recently_seen_set()
-        return self.sector_manager.get_random_position_in_sector(recently_seen)
+        pos = self.sector_manager.get_random_position_in_sector(recently_seen)
+
+        # When raining, avoid selecting cells that would not allow a safe return.
+        if not self.is_raining or self.rain_countdown is None:
+            return pos
+
+        safe_limit = self.rain_countdown - RAIN_DISTANCE_MARGIN
+        if safe_limit <= 0:
+            return (float(self.ark_position[0]), float(self.ark_position[1]))
+
+        attempts = 0
+        while attempts < MAX_RAIN_RANDOM_ATTEMPTS:
+            if distance(*pos, *self.ark_position) <= safe_limit:
+                return pos
+            # Temporarily treat this cell as "recently seen" to avoid reselecting it
+            xcell = int(pos[0])
+            ycell = int(pos[1])
+            recently_seen.add((xcell, ycell))
+            pos = self.sector_manager.get_random_position_in_sector(recently_seen)
+            attempts += 1
+
+        # Fallback to ark position if we fail to find a safe random target
+        return (float(self.ark_position[0]), float(self.ark_position[1]))
 
     def _get_next_sweep_target(self) -> tuple[float, float]:
         """
@@ -430,9 +536,10 @@ class Player8(Player):
         """
         max_attempts = 5000
         attempts = 0
+        step = self._effective_sweep_ring_step()
         while attempts < max_attempts:
             attempts += 1
-            r = max(0.0, self._sweep_ring_index * SWEEP_RING_STEP_KM)
+            r = max(0.0, self._sweep_ring_index * step)
             # Compute angle for this step
             denom = max(1, self._sweep_points_in_ring)
             angle = (2.0 * pi) * (self._sweep_angle_index / denom)
@@ -452,6 +559,11 @@ class Player8(Player):
             # Sector check using cell center
             cx = float(xcell) + 0.5
             cy = float(ycell) + 0.5
+            # During rain, only consider cells that are safely reachable back to the ark
+            if self.is_raining and self.rain_countdown is not None:
+                dist_ark = distance(cx, cy, *self.ark_position)
+                if dist_ark + RAIN_DISTANCE_MARGIN > self.rain_countdown:
+                    continue
             if not self.sector_manager.is_in_sector(cx, cy):
                 continue
             # Cooldown: skip if recently seen
@@ -463,6 +575,22 @@ class Player8(Player):
 
     def _choose_next_target(self) -> tuple[float, float]:
         """Mix between sweep and random targets to balance coverage and exploration."""
+        # During rain, prefer targets that are safely returnable; sweep handles safety.
+        if self.is_raining:
+            return self._get_next_sweep_target()
+
+        # When there's time and we want better coverage, prioritize unvisited cells
+        if (
+            not self.is_raining
+            and self.current_turn > COVERAGE_PRIORITY_TURN
+            and random() < COVERAGE_RANDOM_PROBABILITY
+        ):
+            coverage_target = self._get_coverage_priority_target()
+            if coverage_target is not None:
+                self._target_was_random = True
+                return coverage_target
+
+        # Normal behavior: mix of random and sweep
         if random() < RANDOM_TARGET_PROBABILITY:
             self._target_was_random = True
             return self._get_random_target()
