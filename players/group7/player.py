@@ -275,9 +275,9 @@ class Player7(Player):
                 # Broadcast that we're obtaining this animal (single-byte message)
                 import heapq
 
-                if a.species_id in self._top_sid_set:
-                    self.priorities.discard((a.species_id, a.gender.value))
+                self.priorities.discard((a.species_id, a.gender.value))
 
+                if a.species_id in self._top_sid_set:
                     # Encode the Rank Index (0-63)
                     rank_index = self._sid_to_rank[a.species_id]
 
