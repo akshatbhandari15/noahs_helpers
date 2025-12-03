@@ -45,7 +45,7 @@ class Player7(Player):
         # Linear formation state (optional for coordinated sweeps)
         self._formation_spacing = c.MAX_SIGHT_KM * 0.8  # Stay within sight
 
-        # Deterministic sweep state within territory
+        # Deterministic sweep state within polar sector
         self._sweep_index: int | None = None
 
         # State
@@ -86,6 +86,11 @@ class Player7(Player):
         # Cells we have explicitly decided to ignore (not worth chasing)
         self._ignored_cells: set[tuple[int, int]] = set()
         self._prev_flock_size = 0  # Track for failed obtain detection
+
+        # Polar-sector parameters cached for this helper
+        self._sector_width: float | None = None
+        self._theta_start: float | None = None
+        self._theta_end: float | None = None
 
         # Animals that proved invalid (caught by someone else / unreachable).
         # Once added here, they are never targeted again.
@@ -259,13 +264,11 @@ class Player7(Player):
                     return Release(r)
             else:
                 self._intend_obtain = True
-                # Broadcast that we're obtaining this animal (single-byte message)
+                # Broadcast that we're obtaining this animal
                 import heapq
 
                 self.priorities.discard((a.species_id, a.gender.value))
-                sid_mod = a.species_id & 0x1F  # 5 bits
-                msg = (sid_mod << 3) | (a.gender.value << 2) | 0b00000001
-                msg &= 0xFF
+                msg = (a.species_id << 3) | (a.gender.value << 2) | 0b00000001
                 if msg not in self.messages_sent:
                     heapq.heappush(self.messages_to_send, msg)
                     self.messages_sent.add(msg)
@@ -364,19 +367,28 @@ class Player7(Player):
                     "seen": self.turn,
                 }
 
+        # Cache polar sector parameters once we know ark position and helper count
+        if self._sector_width is None and self.kind != Kind.Noah:
+            helpers = max(1, self.num_helpers)
+            self._sector_width = 2 * math.pi / helpers
+            sector_idx = self.id % helpers
+            # Center sectors around the ark with symmetric spread
+            self._theta_start = -math.pi + sector_idx * self._sector_width
+            self._theta_end = self._theta_start + self._sector_width
+
     def _encode_message(self) -> int:
         if not self.flock:
             return 0
-        # Unified 1-byte format matching _process_messages / obtain broadcasts:
-        # bits 0-1: flags (local/ark), bit 2: gender, bits 3-7: species_id % 32
+        # Encode: bits 0-4=species, bit 5=gender, bit 6=have, bit 7=claim
         best = max(self.flock, key=lambda a: self._value(a.species_id, a.gender))
-        sid_mod = best.species_id & 0x1F
+        sid = best.species_id & 0x1F
+        msg = sid
         from core.animal import Gender
 
-        flags = 0b00000001  # local helper message
-        gender_bit = 1 if best.gender == Gender.Female else 0
-        msg = (sid_mod << 3) | (gender_bit << 2) | flags
-        msg &= 0xFF
+        if best.gender == Gender.Female:
+            msg |= 1 << 5
+        msg |= 1 << 6  # Have this animal
+        msg |= 1 << 7  # Claiming (avoid duplicates)
         return msg
 
     def _process_messages(self, messages: list[Message]) -> None:
@@ -392,28 +404,25 @@ class Player7(Player):
             del self._seen_carrying[k]
 
         for m in messages:
-            b = m.contents & 0xFF
+            b = m.contents
 
-            # Decode unified 1-byte message
+            # Decode message
             from_ark = bool(b & 0b00000010)
             from_local = bool(b & 0b00000001)
-            gender_bit = (b & 0b00000100) >> 2
-            sid_mod = (b & 0b11111000) >> 3
+            gender = (b & 0b00000100) >> 2
+            sid = (b & 0b11111000) >> 3
 
             # Handle ark messages (release if we have it)
             if from_ark:
                 for a in self.flock:
-                    if (a.species_id & 0x1F) == sid_mod and a.gender.value == gender_bit:
+                    if a.species_id == sid and a.gender.value == gender:
                         # Mark for immediate release in get_action
-                        self.priorities.discard((a.species_id, a.gender.value))
+                        self.priorities.discard((sid, gender))
                         break
 
-            # Handle local helper messages (update priorities / claims)
+            # Handle local helper messages (update priorities)
             if from_local:
-                g = Gender.Female if gender_bit == 1 else Gender.Male
-                # Avoid targeting this species+gender bucket
-                self.priorities.discard((sid_mod, g.value))
-                self._claimed[(sid_mod, g.value)] = self.turn
+                self.priorities.discard((sid, gender))
 
             # Forward message to neighbors
             if self.last_snapshot:
@@ -428,6 +437,16 @@ class Player7(Player):
                 ):
                     heapq.heappush(self.messages_to_send, b)
                     self.messages_sent.add(b)
+
+            # Legacy protocol support
+            female = (b >> 5) & 1
+            have = (b >> 6) & 1
+            claiming = (b >> 7) & 1
+            g = Gender.Female if female else Gender.Male
+            if have:
+                self._seen_carrying[(sid, g.value)] = self.turn
+            if claiming:
+                self._claimed[(sid, g.value)] = self.turn
 
     # -------- Decision helpers --------
 
@@ -716,7 +735,7 @@ class Player7(Player):
                         self._tgt_cell = None
                         self._stuck = 0
 
-        # Find best animal to target
+        # Find best animal to target, preferring our own polar sector
         best_cell = None
         best_score = -1.0
 
@@ -773,6 +792,21 @@ class Player7(Player):
                 dist = max(1.0, math.hypot(dx, dy))
                 score = animal_val / dist
 
+                # Bias towards our angular sector around the ark if defined
+                if self._theta_start is not None and self._theta_end is not None:
+                    ax = tx - self.ark_position[0]
+                    ay = ty - self.ark_position[1]
+                    theta = math.atan2(ay, ax)
+                    # Normalize angle into [-pi, pi]
+                    if theta < -math.pi:
+                        theta += 2 * math.pi
+                    if theta > math.pi:
+                        theta -= 2 * math.pi
+
+                    # If outside our sector, down-weight the score
+                    if not (self._theta_start <= theta < self._theta_end):
+                        score *= 0.5
+
                 # Penalize recent cells
                 if (tx, ty) in self._recent:
                     score *= 0.5
@@ -826,7 +860,7 @@ class Player7(Player):
     def _is_in_ark(self, sid: int, gender) -> bool:
         """Check if this species+gender (or species as a whole) is already in the ark.
 
-       Fo r unknown gender, we treat the species as "in ark" if both genders
+        For unknown gender, we treat the species as "in ark" if both genders
         are already present. This prevents chasing distant animals of a
         fully-saved species whose gender we cannot yet see.
         """
@@ -937,7 +971,13 @@ class Player7(Player):
         return Move(nx, ny)
 
     def _explore(self) -> Move:
-        """Deterministic serpentine sweep within biased-outward territory."""
+        """Explore using polar sectors (pizza slices) around the ark.
+
+        The field is partitioned into angular sectors around the ark,
+        one per helper. Within its sector, each helper performs a
+        deterministic radial-by-arc sweep: for increasing radii, it
+        walks along the arc segment belonging to its sector.
+        """
 
         # Late-game safety: don't explore beyond safe return distance
         if self.time_elapsed >= 1008:
@@ -946,51 +986,64 @@ class Player7(Player):
             if dist_to_ark > max_safe_distance:
                 return self._move_to(self.ark_position)
 
-        t = self.territory
-        min_x, max_x = t["min_x"], t["max_x"]
-        min_y, max_y = t["min_y"], t["max_y"]
+        # Ensure polar sector parameters are initialized
+        helpers = max(1, self.num_helpers)
+        ark_x, ark_y = self.ark_position
+        if self._sector_width is None or self._theta_start is None or self._theta_end is None:
+            # Fallback: initialize sector parameters here if not already done
+            self._sector_width = 2 * math.pi / helpers
+            sector_idx = self.id % helpers
+            self._theta_start = -math.pi + sector_idx * self._sector_width
+            self._theta_end = self._theta_start + self._sector_width
 
-        if min_x > max_x or min_y > max_y:
-            return self._move_to(self.ark_position)
+        theta_start = self._theta_start
+        theta_end = self._theta_end
 
-        # Use a small interior margin to avoid edges
-        width = max(1, max_x - min_x)
-        height = max(1, max_y - min_y)
-        margin = min(3, width // 4, height // 4)
+        # Precompute a radial sweep schedule: radius grows as we advance
+        max_radius = math.hypot(c.X, c.Y)
+        num_rings = max(1, int(max_radius / max(1.0, c.MAX_SIGHT_KM)))
 
-        sweep_min_x = min_x + margin
-        sweep_max_x = max_x - margin
-        sweep_min_y = min_y + margin
-        sweep_max_y = max_y - margin
+        # Total discrete positions per ring for this sector.
+        # We sample the arc so that spacing along the ring is about
+        # MAX_SIGHT_KM, using a representative radius.
+        avg_radius = max_radius * 0.7
+        sector_width = theta_end - theta_start
+        arc_len = max(0.0, sector_width) * avg_radius
+        samples_per_ring = max(1, int(arc_len / max(1.0, c.MAX_SIGHT_KM)))
 
-        if sweep_min_x > sweep_max_x or sweep_min_y > sweep_max_y:
-            sweep_min_x, sweep_max_x = min_x, max_x
-            sweep_min_y, sweep_max_y = min_y, max_y
-
-        # Discrete serpentine waypoints across territory
-        width_i = max(1, sweep_max_x - sweep_min_x + 1)
-        height_i = max(1, sweep_max_y - sweep_min_y + 1)
-        total_cells = width_i * height_i
+        total_waypoints = num_rings * samples_per_ring
 
         if self._sweep_index is None:
-            # Stagger starting index based on helper id to further decorrelate
-            self._sweep_index = (self.id * (total_cells // max(1, self.num_helpers))) % total_cells
+            # Start near a ring depending on helper id to decorrelate
+            base = total_waypoints // helpers if helpers > 0 else total_waypoints
+            self._sweep_index = (self.id * base) % max(1, total_waypoints)
 
-        idx = self._sweep_index % total_cells
-        row = idx // width_i
-        col = idx % width_i
+        idx = self._sweep_index % total_waypoints
+        ring = idx // samples_per_ring
+        step_on_ring = idx % samples_per_ring
 
-        # Serpentine: even rows L->R, odd rows R->L
-        if row % 2 == 0:
-            x_tgt = sweep_min_x + col
-        else:
-            x_tgt = sweep_max_x - col
-        y_tgt = sweep_min_y + row
+        # Radius grows linearly with ring index
+        radius = (ring + 1) * (max_radius / num_rings)
 
-        # Advance index when we are close enough to current waypoint
+        # Angle along this helper's sector
+        frac = (step_on_ring + 0.5) / samples_per_ring
+        theta = theta_start + frac * (theta_end - theta_start)
+
+        # Convert polar (relative to ark) to global coordinates
+        x_tgt = ark_x + radius * math.cos(theta)
+        y_tgt = ark_y + radius * math.sin(theta)
+
+        # Clamp into field bounds
+        x_tgt = max(0.0, min(float(c.X - 1), x_tgt))
+        y_tgt = max(0.0, min(float(c.Y - 1), y_tgt))
+
+        # If target fell outside our sector due to clamping, just move there;
+        # the next step will advance the index and continue the sweep.
+
+        # Advance index when close enough to current waypoint
         cur_x, cur_y = self.position
         if abs(cur_x - x_tgt) <= 0.5 and abs(cur_y - y_tgt) <= 0.5:
-            self._sweep_index = (self._sweep_index + 1) % total_cells
+            self._sweep_index = (self._sweep_index + 1) % total_waypoints
 
         return self._move_to((x_tgt, y_tgt))
 
