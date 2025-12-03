@@ -130,13 +130,13 @@ class Player7(Player):
                 self.priorities.discard((sid, gender))
 
                 if sid not in self._top_sid_set:
-                    continue # Skip encoding this message
+                    continue  # Skip encoding this message
 
                 rank_index = self._sid_to_rank[sid]
 
                 # Ark message: Bits 2-7=Species, Bit 1=Gender, Bit 0=Flag (0=ARK)
-                flag = 0b00000000   # ARK Flag (0)
-                
+                flag = 0b00000000  # ARK Flag (0)
+
                 # Assembly: (Species << 2) | (Gender << 1) | Flag
                 msg = (rank_index << 2) | (gender << 1) | flag
 
@@ -277,24 +277,24 @@ class Player7(Player):
 
                 if a.species_id in self._top_sid_set:
                     self.priorities.discard((a.species_id, a.gender.value))
-                    
+
                     # Encode the Rank Index (0-63)
                     rank_index = self._sid_to_rank[a.species_id]
-                    
+
                     # Gender (1 bit: Bit 1)
-                    gender_bit = a.gender.value # 0 for Male, 1 for Female
-                    
+                    gender_bit = a.gender.value  # 0 for Male, 1 for Female
+
                     # Flag (1 bit: Bit 0) - Local Helper (1)
-                    flag = 0b00000001 
-                    
+                    flag = 0b00000001
+
                     # Assembly: (Rank_Index << 2) | (Gender << 1) | Flag
                     msg = (rank_index << 2) | (gender_bit << 1) | flag
                     msg &= 0xFF
-                    
+
                     if msg not in self.messages_sent:
                         heapq.heappush(self.messages_to_send, msg)
                         self.messages_sent.add(msg)
-                        
+
                 return Obtain(a)
 
         mv = self._pursue_best_cell()
@@ -393,26 +393,26 @@ class Player7(Player):
     def _encode_message(self) -> int:
         if not self.flock:
             return 0
-        
+
         best = max(self.flock, key=lambda a: self._value(a.species_id, a.gender))
         from core.animal import Gender
-        
+
         # Check if species is in the top 64. If not, return default (0).
         if best.species_id not in self._top_sid_set:
-            return 0 
+            return 0
 
         # Species ID (6 bits: Bits 2-7) is the Rank Index
         rank_index = self._sid_to_rank[best.species_id]
-        
+
         # Gender (1 bit: Bit 1)
         gender_bit = 1 if best.gender == Gender.Female else 0
-        
+
         # Flag (1 bit: Bit 0) - Local Helper (1)
         flag = 0b00000001
-        
+
         # Assembly: (Rank_Index << 2) | (Gender << 1) | Flag
         msg = (rank_index << 2) | (gender_bit << 1) | flag
-        msg &= 0xFF 
+        msg &= 0xFF
 
         # print(f"[{self.id}][t={self.turn}] Local Encode: SID {best.species_id} (Rank {rank_index}, G {gender_bit}) -> Msg {msg:#04x}")
 
@@ -434,12 +434,12 @@ class Player7(Player):
             b = m.contents & 0xFF
 
             # Decode 1-byte message: Bits 2-7=SID, Bit 1=Gender, Bit 0=Flag
-            
+
             # Flag (Bit 0)
             flag = b & 0b00000001
-            
+
             # Gender (Bit 1)
-            gender_bit = (b & 0b00000010) >> 1 
+            gender_bit = (b & 0b00000010) >> 1
 
             # Rank Index (Bits 2-7)
             rank_index = (b & 0b11111100) >> 2
@@ -447,14 +447,14 @@ class Player7(Player):
             if rank_index not in self._rank_to_sid:
                 # if b != 0:
                 #     print(f"[{self.id}][t={self.turn}] Decode Skip: Rank {rank_index} invalid or silent (Msg {b:#04x}).")
-                continue # Ignore message if rank is invalid
+                continue  # Ignore message if rank is invalid
 
             # Get the unique, Full Species ID from the rank index
             full_sid_from_msg = self._rank_to_sid[rank_index]
 
             # Determine message source based on flag:
-            from_ark = flag == 0 # Flag 0 = Ark Message
-            from_local = flag == 1 # Flag 1 = Local Helper Message
+            from_ark = flag == 0  # Flag 0 = Ark Message
+            from_local = flag == 1  # Flag 1 = Local Helper Message
 
             # [DEBUG] Print successful message decoding
             # print(f"[{self.id}][t={self.turn}] Decoded Msg {b:#04x} ({source_type}): Full SID {full_sid_from_msg} (Rank {rank_index}, G {gender_bit}) from Helper {m.from_helper.id}.")
@@ -462,7 +462,10 @@ class Player7(Player):
             # Handle ark messages (release if we have it)
             if from_ark:
                 for a in self.flock:
-                    if a.species_id == full_sid_from_msg and a.gender.value == gender_bit:
+                    if (
+                        a.species_id == full_sid_from_msg
+                        and a.gender.value == gender_bit
+                    ):
                         # Mark for immediate release in get_action
                         self.priorities.discard((a.species_id, a.gender.value))
                         # print(f"[{self.id}][t={self.turn}] Ark Action: DISCARDED priority for SID {full_sid_from_msg} (Ark has it).")
@@ -471,10 +474,10 @@ class Player7(Player):
             # Handle local helper messages (update priorities / claims)
             if from_local:
                 g = Gender.Female if gender_bit == 1 else Gender.Male
-                
+
                 # Claim the species using the full SID
                 self._claimed[(full_sid_from_msg, g.value)] = self.turn
-                
+
                 # Discard the full species ID from priorities
                 self.priorities.discard((full_sid_from_msg, g.value))
                 # print(f"[{self.id}][t={self.turn}] Local Action: CLAIMED and DISCARDED priority for SID {full_sid_from_msg}.")
@@ -890,9 +893,9 @@ class Player7(Player):
     def _is_in_ark(self, sid: int, gender) -> bool:
         """Check if this species+gender (or species as a whole) is already in the ark.
 
-       Fo r unknown gender, we treat the species as "in ark" if both genders
-        are already present. This prevents chasing distant animals of a
-        fully-saved species whose gender we cannot yet see.
+        Fo r unknown gender, we treat the species as "in ark" if both genders
+         are already present. This prevents chasing distant animals of a
+         fully-saved species whose gender we cannot yet see.
         """
         from core.animal import Gender
 
@@ -1063,22 +1066,25 @@ class Player7(Player):
     # -------- Setup helpers --------
 
     def _compute_top_species_map(self):
-        sid_populations = {ord(char) - ord('a'): count 
-                           for char, count in self.species_populations.items()}
-        
+        sid_populations = {
+            ord(char) - ord("a"): count
+            for char, count in self.species_populations.items()
+        }
+
         # Sort by population (descending)
-        sorted_sids = sorted(sid_populations.keys(), 
-                             key=lambda sid: sid_populations[sid], reverse=True)
-        
+        sorted_sids = sorted(
+            sid_populations.keys(), key=lambda sid: sid_populations[sid], reverse=True
+        )
+
         # Store the list of top 64 species ids
         self.top_64_sids = sorted_sids[:64]
-        
+
         # Map 1: Species id -> rank index
         self._sid_to_rank = {sid: rank for rank, sid in enumerate(self.top_64_sids)}
-        
+
         # Map 2: Rank Index -> species id
         self._rank_to_sid = {rank: sid for sid, rank in self._sid_to_rank.items()}
-        
+
         # Set of sids for fast lookup
         self._top_sid_set = set(self.top_64_sids)
 
