@@ -155,13 +155,13 @@ class Player7(Player):
         self._process_messages(messages)
 
         # Debug summary each turn
-        try:
-            flock_summary = [
-                (a.species_id, getattr(a.gender, "name", str(a.gender)))
-                for a in self.flock
-            ]
-        except Exception:
-            flock_summary = []
+        # try:
+        #     flock_summary = [
+        #         (a.species_id, getattr(a.gender, "name", str(a.gender)))
+        #         for a in self.flock
+        #     ]
+        # except Exception:
+        #     flock_summary = []
         # print(
         #     f"[P7] t={self.turn} pos={self.position} flock={flock_summary}, territory={self.territory}"
         # )
@@ -515,7 +515,7 @@ class Player7(Player):
             if a in self._ignored_animals:
                 continue
             if a in self.flock:
-                #print(f"[P7] best_here skip: in flock sid={a.species_id} g={a.gender}")
+                # print(f"[P7] best_here skip: in flock sid={a.species_id} g={a.gender}")
                 continue
             # Skip exact species+gender duplicates (we already carry one)
             if any(
@@ -874,10 +874,10 @@ class Player7(Player):
         # genders have been saved.
         if gender is None or gender == Gender.Unknown:
             in_ark = info.get(Gender.Male, False) and info.get(Gender.Female, False)
-            #if in_ark:
-                # print(
-                #     f"[P7] _is_in_ark: skip unknown-gender of fully-saved species sid={sid}"
-                # )
+            # if in_ark:
+            # print(
+            #     f"[P7] _is_in_ark: skip unknown-gender of fully-saved species sid={sid}"
+            # )
             return in_ark
 
         return info.get(gender, False)
@@ -989,7 +989,11 @@ class Player7(Player):
         # Ensure polar sector parameters are initialized
         helpers = max(1, self.num_helpers)
         ark_x, ark_y = self.ark_position
-        if self._sector_width is None or self._theta_start is None or self._theta_end is None:
+        if (
+            self._sector_width is None
+            or self._theta_start is None
+            or self._theta_end is None
+        ):
             # Fallback: initialize sector parameters here if not already done
             self._sector_width = 2 * math.pi / helpers
             sector_idx = self.id % helpers
