@@ -107,8 +107,8 @@ def display_results(results: List[Dict[str, Any]], output_csv: pathlib.Path = No
         results: List of result dictionaries
         output_csv: Optional path to save CSV file
     """
-    # Sort by score (descending)
-    results_sorted = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
+    # Sort by test_name (alphabetically)
+    results_sorted = sorted(results, key=lambda x: x.get("test_name", ""))
 
     # Display table
     print("\n" + "=" * 80)

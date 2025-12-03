@@ -1,0 +1,52 @@
+Logic Revamp — Detailed Change Log
+
+Summary (brief commit message):
+Logic revamp: centralize movement, pass-on fallback, occupancy checks, offload guard, strict noop semantics
+
+Detailed list of changes made in this branch:
+
+1) Centralized move wrapper
+- Added `_do_move(self, x, y, reason, allow_noop=False)` to `players/group9/player.py`.
+- All decision branches that previously returned `Move(...)` were updated to call `_do_move(...)` and treat a `None` return as a "pass" so subsequent conditionals run.
+- `_do_move` records `last_move`/`last_move_reason` and prints `MOVE` logs for actions that will actually execute.
+
+2) Pass-on fallback behavior
+- `_do_move` returns `None` when it would previously perform a sweep fallback (i.e., when the request is a no-op or target cell is occupied), allowing `get_action` to continue evaluating the next conditional.
+- The final sweep is logged once and executed at the end of `get_action` (only after all earlier conditionals pass).
+
+3) Occupancy checks
+- Added `_cell_has_other_helper(x, y)` to `players/group9/player.py` which checks the helper's `sight` to detect other helpers on the integer cell (ark cell exempt).
+- `get_action` now avoids moving into occupied integer target cells by treating those cases as passes (so another branch or final sweep will run instead).
+
+4) Ark offload behavior and returns
+- Added checks that force an explicit Move (with `allow_noop=True`) when a helper is at the Ark with a non-empty flock so the engine will process the Move and offload the flock to the Ark.
+- Return-related moves (rain/time/fleet-full) set `allow_noop=True` to ensure those moves are not subsumed by pass fallback logic.
+
+5) No-op semantics tightened
+- Changed noop detection to use exact float equality (only if requested coords exactly match current coords will `_do_move` signal a pass). This prevents meaningful fractional progress from being treated as a noop.
+
+6) Reduced noisy fallback logs
+- Removed SWEEP_FALLBACK prints from `_do_move` when it only signals a pass. A single `MOVE reason=sweep` is now printed only when the sweep is actually executed (final fallback).
+
+7) Minor restorations & fixes during edits
+- Restored `_find_animals_in_corridor` which had been accidentally moved during edits.
+- Fixed types/signatures so `_do_move` returns `Move | None` and all call sites check accordingly.
+
+Rationale & notes:
+- The engine processes a single action per helper per turn; Obtain/Release consume the turn (no Move that turn). The pass-on design reduces accidental substitution of intended moves with sweeps and gives the decision tree more chance to pick a non-sweep action.
+- Occupancy checks are intentionally lenient for the Ark cell so helpers can converge there.
+
+Files changed (high level):
+- players/group9/player.py (many edits)
+  - Added: `_do_move`, `_cell_has_other_helper`
+  - Restored: `_find_animals_in_corridor`
+  - Updated: all `get_action` return sites to handle `_do_move` pass behavior and final sweep logging
+
+How to test:
+- Run a short headless sim to observe `MOVE reason=...` logs and that sweep messages only appear when the final fallback executes:
+
+  python -u main.py -T 50 --player 9 --seed 123 --map_path .\maps\template\t1.json
+
+- To inspect code edits directly, open `players/group9/player.py`.
+
+If the push fails due to remote auth or upstream mismatch, run locally to resolve credentials or rebase as needed. Reach out if you'd like me to adjust branch name or squash commits.
